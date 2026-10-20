@@ -396,17 +396,32 @@
   }
   .toggle-btn.active svg { stroke: #fff; }
   .toggle-btn svg { stroke: #444; }
+  /* Zablokowany przycisk: jaśniejsze kolory zamiast opacity, bo opacity
+     przyciemniłoby też jego podpowiedź (::after). Kolory odpowiadają
+     dawnemu wyglądowi z opacity 0.5 na białym tle. */
   .toggle-btn.disabled {
-    opacity: 0.5;
     cursor: default;
-    background: #f5f5f5;
-    color: #999;
+    background: #fafafa;
+    border-color: #e6e6e6;
+    color: #ccc;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.075);
   }
   .toggle-btn.disabled:hover {
-    background: #f5f5f5;
+    background: #fafafa;
   }
   .toggle-btn.disabled svg {
-    stroke: #999;
+    stroke: #ccc;
+  }
+  /* Narzędzie włączone, ale na okładce: wyblakły niebieski (jak dawniej
+     niebieski z opacity 0.5), żeby było widać, że nadal jest aktywne. */
+  .toggle-btn.active.disabled,
+  .toggle-btn.active.disabled:hover {
+    background: #80bbeb;
+    border-color: #80bbeb;
+    color: #fff;
+  }
+  .toggle-btn.active.disabled svg {
+    stroke: #fff;
   }
   /* Hint shown while move mode is on, pinned outside the book's right edge,
      bottom border level with the book's bottom border. */
@@ -685,6 +700,44 @@
     background: #0078d7;
     border-color: #0078d7;
     color: #fff;
+  }
+  /* Własne podpowiedzi przycisków narzędzi (zamiast atrybutu title, którego
+     dymki w WebView2 pokazują się dopiero przy drugim najechaniu myszką).
+     Pojawiają się pod przyciskiem po pół sekundy, jak zwykłe dymki. */
+  .toggle-btn { position: relative; }
+  .toggle-btn[data-tip]::after {
+    content: attr(data-tip);
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;                /* rośnie w lewo, więc nigdy nie wyjdzie za prawą krawędź okna */
+    width: max-content;
+    max-width: 260px;
+    padding: 4px 8px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: #333;
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    white-space: normal;
+    text-align: left;
+    pointer-events: none;    /* dymek nigdy nie łapie myszki */
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.15s ease, visibility 0s linear 0.15s;
+    z-index: 20;
+  }
+  .toggle-btn[data-tip]:hover::after {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.15s ease 0.5s, visibility 0s linear 0.5s;
+  }
+  /* Kliknięcie chowa dymek od razu, tak jak przy zwykłych dymkach. */
+  .toggle-btn[data-tip]:active::after {
+    opacity: 0;
+    visibility: hidden;
+    transition: none;
   }
 </style>
 </head>
@@ -4312,37 +4365,37 @@
           h("div", { className: "toggle-row" },
             h("div", {
               className: "toggle-btn" + (tool === TOOL_TEXT ? " active" : "") + (isCurrentPageCover() ? " disabled" : ""),
-              title: "Tekst: kliknij stronę, aby dodać pole tekstowe" + coverNote,
+              "data-tip": "Tekst: kliknij stronę, aby dodać pole tekstowe" + coverNote,
               onClick: toggleTextMode
             }, "A"),
             h("div", {
               className: "toggle-btn" + (tool === TOOL_MOVE ? " active" : "") + (isCurrentPageCover() ? " disabled" : ""),
-              title: "Przesuwanie i kopiowanie tekstu oraz obrazów" + coverNote,
+              "data-tip": "Przesuwanie i kopiowanie tekstu oraz obrazów" + coverNote,
               onClick: toggleMoveMode
             }, h(MoveIcon)),
             // Adding pages also works on the covers (front = beginning, back = end).
             h("div", {
               className: "toggle-btn",
-              title: "Dodaj dwie strony",
+              "data-tip": "Dodaj dwie strony",
               onClick: addPages
             }, h(AddPageIcon)),
             // Delete pages: a plain button, never stays selected.
             h("div", {
               className: "toggle-btn" + (isCurrentPageCover() ? " disabled" : ""),
-              title: "Usuń wyświetlane strony" + coverNote,
+              "data-tip": "Usuń wyświetlane strony" + coverNote,
               onClick: openDeleteDialog
             }, h(DeletePageIcon)),
             // Add an image: never stays selected, works on any spread.
             h("div", {
               className: "toggle-btn",
-              title: "Dodaj obraz",
+              "data-tip": "Dodaj obraz",
               onClick: openImageDialog
             }, h(AddImageIcon)),
             // Wyrównywanie do punktów: działa razem z innymi narzędziami.
             h("div", {
               className: "toggle-btn" + (alignOn ? " active" : ""),
-              title: "Wyrównywanie do punktów",
-			  onMouseDown: (e) => e.preventDefault(),
+              "data-tip": "Wyrównywanie do punktów",
+              onMouseDown: (e) => e.preventDefault(),
               onClick: toggleAlign
             }, h(MagnetIcon))
           ),
