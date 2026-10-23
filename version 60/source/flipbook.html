@@ -35,6 +35,8 @@
     align-items: center;
     justify-content: center;
     overflow: hidden;
+	box-sizing: border-box;
+    padding-bottom: 68px;   /* stałe miejsce na pasek wyrównywania (ALIGN_BAR_H) */
   }
   .app {
     display: flex;
@@ -113,6 +115,10 @@
     cursor: text;
     user-select: text;
     -webkit-user-select: text;
+  }
+    /* Podpis przyklejony do obrazu: każda linia wyśrodkowana pod obrazem. */
+  .textbox[data-anchor-image] {
+    text-align: center;
   }
   /* Each box + its toolbar is one layer (z-index creates a stacking
      context), so another box's toolbar can never slip between them. */
@@ -290,6 +296,18 @@
     z-index: 9999;
     cursor: inherit;
   }
+    /* Pasek narzędzi pola przesunięty tak, żeby mieścił się na stronie
+     (wartości ustawia funkcja placeToolbar): w lewo przy prawej krawędzi,
+     pod pole przy górnej krawędzi. */
+  .textbox-wrapper > .fontsize-control,
+  .textbox-wrapper > .fontsize-spin,
+  .textbox-wrapper > .format-btn,
+  .textbox-wrapper > .font-family-control {
+    transform: translate(var(--tb-shift, 0px), var(--tb-drop, 0px));
+  }
+  .textbox-wrapper > .toolbar-strip {
+    transform: translate(var(--tb-shift, 0px), var(--tb-drop-strip, 0px));
+  }
   .book-wrap.text-mode .toolbar-strip {
     display: block;
   }
@@ -394,17 +412,32 @@
   }
   .toggle-btn.active svg { stroke: #fff; }
   .toggle-btn svg { stroke: #444; }
+  /* Zablokowany przycisk: jaśniejsze kolory zamiast opacity, bo opacity
+     przyciemniłoby też jego podpowiedź (::after). Kolory odpowiadają
+     dawnemu wyglądowi z opacity 0.5 na białym tle. */
   .toggle-btn.disabled {
-    opacity: 0.5;
     cursor: default;
-    background: #f5f5f5;
-    color: #999;
+    background: #fafafa;
+    border-color: #e6e6e6;
+    color: #ccc;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.075);
   }
   .toggle-btn.disabled:hover {
-    background: #f5f5f5;
+    background: #fafafa;
   }
   .toggle-btn.disabled svg {
-    stroke: #999;
+    stroke: #ccc;
+  }
+  /* Narzędzie włączone, ale na okładce: wyblakły niebieski (jak dawniej
+     niebieski z opacity 0.5), żeby było widać, że nadal jest aktywne. */
+  .toggle-btn.active.disabled,
+  .toggle-btn.active.disabled:hover {
+    background: #80bbeb;
+    border-color: #80bbeb;
+    color: #fff;
+  }
+  .toggle-btn.active.disabled svg {
+    stroke: #fff;
   }
   /* Hint shown while move mode is on, pinned outside the book's right edge,
      bottom border level with the book's bottom border. */
@@ -628,6 +661,100 @@
     background: #006cc1;
     border-color: #006cc1;
   }
+  .align-dot {
+    position: absolute;
+    width: calc(var(--u, 1px) * 6);
+    height: calc(var(--u, 1px) * 6);
+    margin-left: calc(var(--u, 1px) * -3);   /* środek kropki = punkt wyrównania */
+    margin-top: calc(var(--u, 1px) * -3);
+    border-radius: 50%;
+    background: #c8c8c8;
+    pointer-events: none;
+    user-select: none;
+    z-index: 0;
+  }
+  /* Pasek z opcjami przy dolnej krawędzi okna. Zawsze w DOM-ie;
+     klasa .visible go wysuwa i pokazuje. */
+  .align-bar {
+    position: fixed;
+    left: 50%;
+    bottom: 12px;
+    display: flex;
+    gap: 8px;
+    padding: 6px 8px;
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+    transform: translate(-50%, 16px);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s;
+    user-select: none;
+    z-index: 50;
+  }
+  .align-bar.visible {
+    transform: translate(-50%, 0);
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0s;
+  }
+  .align-option {
+    width: 52px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    background: #fff;
+    color: #444;
+    cursor: pointer;
+  }
+  .align-option:hover { background: #eee; }
+  .align-option.active {
+    background: #0078d7;
+    border-color: #0078d7;
+    color: #fff;
+  }
+  /* Własne podpowiedzi przycisków narzędzi (zamiast atrybutu title, którego
+     dymki w WebView2 pokazują się dopiero przy drugim najechaniu myszką).
+     Pojawiają się pod przyciskiem po pół sekundy, jak zwykłe dymki. */
+  .toggle-btn { position: relative; }
+  .toggle-btn[data-tip]::after {
+    content: attr(data-tip);
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;                /* rośnie w lewo, więc nigdy nie wyjdzie za prawą krawędź okna */
+    width: max-content;
+    max-width: 260px;
+    padding: 4px 8px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: #333;
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    white-space: normal;
+    text-align: left;
+    pointer-events: none;    /* dymek nigdy nie łapie myszki */
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.15s ease, visibility 0s linear 0.15s;
+    z-index: 20;
+  }
+  .toggle-btn[data-tip]:hover::after {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.15s ease 0.5s, visibility 0s linear 0.5s;
+  }
+  /* Kliknięcie chowa dymek od razu, tak jak przy zwykłych dymkach. */
+  .toggle-btn[data-tip]:active::after {
+    opacity: 0;
+    visibility: hidden;
+    transition: none;
+  }
 </style>
 </head>
 <body>
@@ -683,6 +810,7 @@
   const MARGIN_X = 48;         // breathing room left+right of the spread
   const MARGIN_Y = 32;         // breathing room top+bottom
   const CONTROLS_H = 60;       // buttons row + its margin
+  const ALIGN_BAR_H = 68;      // miejsce na pasek wyrównywania (to samo co padding-bottom w #root)
 
   // Text sizes are measured in "page units" instead of screen pixels, so a
   // page looks the same on every screen. One unit = page width / REF_PAGE_W.
@@ -810,6 +938,125 @@
   // (line height 1.3 + 4 units of padding above and below).
   const NEW_BOX_MIN_W_UNITS = 40;
   const NEW_BOX_MIN_H_UNITS = BASE_FONT_SIZE * 1.3 + 8;
+    // ---- Punkty wyrównania (narzędzie "magnes") ------------------------------
+
+  // Opcje z paska: kolumny x wiersze punktów na KAŻDEJ stronie.
+  const ALIGN_LAYOUTS = [
+    { cols: 1, rows: 1, title: "1 punkt na stronie" },
+    { cols: 1, rows: 2, title: "2 punkty na stronie" },
+    { cols: 2, rows: 2, title: "4 punkty na stronie" },
+    { cols: 2, rows: 3, title: "6 punktów na stronie" },
+    { cols: 3, rows: 3, title: "9 punktów na stronie" }
+  ];
+
+  // Jak blisko kropki (w jednostkach strony) musi być środek elementu,
+  // żeby został do niej przyciągnięty.
+  const SNAP_UNITS = 16;
+  // ---- Kropki pod obrazami (narzędzie "wyrównywanie tekstu do obrazów") ----
+
+  // Odstęp kropki od dolnej krawędzi obrazu, w jednostkach strony.
+  const CAPTION_GAP_UNITS = 14;
+  // Najmniejszy odstęp między dolną krawędzią obrazu a górną krawędzią
+  // podpisu, w jednostkach strony (przy dużej czcionce podpis zsuwa się niżej).
+  const CAPTION_MIN_GAP_UNITS = 2;
+
+  // Górna krawędź podpisu (piksele strony), gdy kropka jest na wysokości dotY,
+  // a środek pierwszej linii jest lineY pikseli od góry pola: pierwsza linia
+  // na kropce, ale pole nigdy nie wchodzi na obraz.
+  function captionTopPx(dotY, lineY, pageW) {
+    const u = pageW / REF_PAGE_W;
+    const imgBottom = dotY - CAPTION_GAP_UNITS * u;
+    return Math.max(dotY - lineY, imgBottom + CAPTION_MIN_GAP_UNITS * u);
+  }
+
+  // Kropka pod obrazem bez sprawdzania, czy mieści się na stronie
+  // (podpis przyklejony do obrazu i tak zostanie na stronie, patrz keepAnchored).
+  function captionDotRawPx(L, T, W, H, pageW) {
+    const u = pageW / REF_PAGE_W;
+    return { x: L + W / 2, y: T + H + CAPTION_GAP_UNITS * u };
+  }
+
+  // Kropka pod obrazem o lewym górnym rogu (L, T) i rozmiarze W x H (piksele
+  // strony): na środku szerokości obrazu, trochę pod nim. null, jeśli nie
+  // mieści się już na stronie.
+  function captionDotPx(L, T, W, H, pageW, pageH) {
+    const p = captionDotRawPx(L, T, W, H, pageW);
+    const u = pageW / REF_PAGE_W;
+    if (p.y + (NEW_BOX_MIN_H_UNITS / 2 + CAPTION_MIN_GAP_UNITS) * u + 4 > pageH) return null;
+    return p;
+  }
+
+  // Pole tekstowe, którego środek pierwszej linii jest teraz w punkcie
+  // (cx, cy). offX / offY to położenie tego środka wewnątrz pola, boxW / boxH
+  // to rozmiar pola (wszystko w pikselach strony). Jeśli blisko jest kropka
+  // spod któregoś obrazu na tej stronie, zwraca nowe left / top (ułamki
+  // strony, pole w całości na stronie) i tę kropkę. Inaczej null.
+  function snapToCaption(pageEl, imgs, cx, cy, offX, offY, boxW, boxH) {
+    if (!pageEl || pageEl.classList.contains("page-cover")) return null;
+    const W = pageEl.offsetWidth, H = pageEl.offsetHeight;
+    if (!W || !H) return null;
+
+    let best = null, bestId = null, bestD = SNAP_UNITS * W / REF_PAGE_W;
+    imgs.forEach((im) => {
+      const p = captionDotPx(im.left * W, im.top * H, im.w * W, im.h * H, W, H);
+      if (!p) return;
+      if (captionTopPx(p.y, offY, W) + boxH > pageEl.clientHeight) return;
+      // Odległość do miejsca, w którym pierwsza linia stanie po przyciągnięciu
+      // (przy dużej czcionce pole zsuwa się pod obraz, więc to nie zawsze kropka).
+      const ty = captionTopPx(p.y, offY, W) + offY;
+      const d = Math.hypot(p.x - cx, ty - cy);
+      if (d <= bestD) { bestD = d; best = p; bestId = im.id; }
+    });
+    if (!best) return null;
+
+    const maxL = Math.max(pageEl.clientWidth - boxW, 0);
+    const maxT = Math.max(pageEl.clientHeight - boxH, 0);
+    return {
+      left: Math.min(Math.max(best.x - offX, 0), maxL) / W,
+      top:  Math.min(Math.max(captionTopPx(best.y, offY, W), 0), maxT) / H,
+      // line: liczy się pierwsza linia; imageId: obraz, do którego podpis jest przyklejony
+      dot: { x: best.x / W, y: best.y / H, line: true, imageId: bestId }
+    };
+  }
+
+  // Punkty danej opcji jako ułamki szerokości / wysokości strony,
+  // rozłożone równo (np. 3 kolumny: 1/4, 2/4, 3/4).
+  function alignPoints(index) {
+    const { cols, rows } = ALIGN_LAYOUTS[index] || ALIGN_LAYOUTS[0];
+    const pts = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        pts.push({ x: (c + 1) / (cols + 1), y: (r + 1) / (rows + 1) });
+      }
+    }
+    return pts;
+  }
+
+  // Element o lewym górnym rogu (left, top) i rozmiarze (wf, hf), wszystko
+  // jako ułamki strony. Jeśli jego środek jest bardzo blisko kropki, zwraca
+  // nowe left / top (środek na kropce, element wciąż w całości na stronie)
+  // oraz tę kropkę. Inaczej null. Okładki nie mają kropek.
+  function snapToDot(pageEl, layoutIndex, left, top, wf, hf) {
+    if (!pageEl || pageEl.classList.contains("page-cover")) return null;
+    const W = pageEl.offsetWidth, H = pageEl.offsetHeight;
+    if (!W || !H) return null;
+
+    const cx = (left + wf / 2) * W, cy = (top + hf / 2) * H;
+    let best = null, bestD = SNAP_UNITS * W / REF_PAGE_W;
+    alignPoints(layoutIndex).forEach((p) => {
+      const d = Math.hypot(p.x * W - cx, p.y * H - cy);
+      if (d <= bestD) { bestD = d; best = p; }
+    });
+    if (!best) return null;
+
+    const maxLeft = Math.max(pageEl.clientWidth / W - wf, 0);
+    const maxTop  = Math.max(pageEl.clientHeight / H - hf, 0);
+    return {
+      left: Math.min(Math.max(best.x - wf / 2, 0), maxLeft),
+      top:  Math.min(Math.max(best.y - hf / 2, 0), maxTop),
+      dot: best
+    };
+  }
 
   // Corner handle size (px) and the smallest a picture's shorter side may get.
   const IMAGE_HANDLE = 11;
@@ -852,6 +1099,27 @@
       el.style.width = hs + "px";
       el.style.height = hs + "px";
     });
+	    // Kropka pod obrazem (jeśli narzędzie jest włączone) jedzie razem z nim.
+    const dot = pageEl.querySelector(`.caption-dot[data-image-id="${id}"]`);
+    if (dot) {
+      const p = captionDotPx(L, T, W, H, pageEl.offsetWidth, pageEl.offsetHeight);
+      dot.style.display = p ? "" : "none";
+      if (p) {
+        dot.style.left = p.x + "px";
+        dot.style.top = p.y + "px";
+      }
+    }
+    // Podpisy przyklejone do tego obrazu jadą razem z nim (przesuwanie
+    // i zmiana rozmiaru), już w trakcie przeciągania.
+    const pw = pageEl.offsetWidth, ph = pageEl.offsetHeight;
+    if (pw && ph) {
+      const cp = captionDotRawPx(L, T, W, H, pw);
+      pageEl.querySelectorAll(`.textbox[data-anchor-image="${id}"]`).forEach((box) => {
+        box.dataset.anchorX = cp.x / pw;
+        box.dataset.anchorY = cp.y / ph;
+        keepAnchored(box);
+      });
+    }
   }
 
   // Puts a picture (and its corner arrows) above everything else on its
@@ -901,6 +1169,26 @@
         ref,
         "data-page-key": props.pageKey
       },
+      !props.cover && props.alignDots && props.alignDots.map((p, i) => h("div", {
+        key: "dot" + i,
+        className: "align-dot",
+        style: { left: (p.x * props.pageW) + "px", top: (p.y * props.pageH) + "px" }
+      })),
+	        // Kropki pod obrazami: przed obrazami w DOM-ie, więc obrazy, pola
+      // tekstowe i wszystko inne zawsze zachodzą na nie z wierzchu.
+      props.captionOn && props.images.map((img) => {
+        const p = captionDotPx(
+          img.left * props.pageW, img.top * props.pageH,
+          img.w * props.pageW,    img.h * props.pageH,
+          props.pageW, props.pageH
+        );
+        return h("div", {
+          key: "cap" + img.id,
+          className: "align-dot caption-dot",
+          "data-image-id": img.id,
+          style: p ? { left: p.x + "px", top: p.y + "px" } : { display: "none" }
+        });
+      }),
       // Pictures sit under the text boxes. They only catch clicks in move
       // mode (see the CSS), where they can be selected and dragged.
       props.images.map((img) => h("img", {
@@ -936,7 +1224,7 @@
             height: hs + "px"
           }
         }));
-      }),
+      }), 
       props.boxes.map((box) => {
         const commitFontSize = (input) => {
           if (input.value === input.dataset.startValue) return; // nothing changed
@@ -1136,6 +1424,7 @@
         return h("div", {
           key: box.id,
           className: "textbox-wrapper",
+		  ref: (el) => { if (el) placeToolbar(el); },
           style: {
             left: (box.left * props.pageW) + "px",
             top:  (box.top  * props.pageH) + "px"
@@ -1281,6 +1570,10 @@
           h("div", {
             className: "textbox" + (props.selectedId === box.id ? " selected" : ""),
             "data-box-id": box.id,
+			"data-anchor-x": box.anchor ? box.anchor.x : undefined,
+            "data-anchor-y": box.anchor ? box.anchor.y : undefined,
+			"data-anchor-line": box.anchor && box.anchor.line ? "1" : undefined,
+			"data-anchor-image": box.anchor && box.anchor.imageId != null ? box.anchor.imageId : undefined,
             contentEditable: props.textMode,
             suppressContentEditableWarning: true,
             spellCheck: false,
@@ -1288,7 +1581,9 @@
               width: box.width ? (box.width * props.pageW) + "px" : "auto",
               maxWidth: box.width
                 ? (box.width * props.pageW) + "px"
-                : ((props.pageW - 2) - box.left * props.pageW) + "px"
+                : box.anchor
+                  ? (props.pageW - 2) + "px"   // wyśrodkowane pole może mieć całą szerokość strony
+                  : ((props.pageW - 2) - box.left * props.pageW) + "px"
             },
             ref: (el) => {
               if (el) {
@@ -1301,6 +1596,7 @@
                   // A newly created box: caret at its start.
                   if (props.focusIdRef.current === box.id) {
                     props.focusIdRef.current = null;
+					keepAnchored(el);
                     focusBoxSoon(el, (b) => {
                       const r = document.createRange();
                       r.selectNodeContents(b);
@@ -1357,6 +1653,10 @@
               if (!el.parentElement || !el.parentElement.contains(e.relatedTarget)) {
                 removePendingSpans(el, null);
               }
+			  
+			  // Pole wyśrodkowane na kropce mogło się przesunąć podczas pisania
+              // (albo zmniejszyć przed chwilą): zapisz jego aktualne położenie.
+              props.onBoxPos(box.id, el);
 
               if (!boxHasText(el)) {
                 // Decide a frame later: if focus came straight back (e.g. the
@@ -1433,7 +1733,7 @@
   // vertically (minus the controls). Whichever axis runs out first wins.
   function computePageSize() {
     const availW = Math.max(window.innerWidth - MARGIN_X, MIN_PAGE_W * 2);
-    const availH = Math.max(window.innerHeight - MARGIN_Y - CONTROLS_H, MIN_PAGE_W * PAGE_RATIO);
+    const availH = Math.max(window.innerHeight - MARGIN_Y - CONTROLS_H - ALIGN_BAR_H, MIN_PAGE_W * PAGE_RATIO);
 
     let w = Math.floor(availW / 2);
     if (Math.floor(w * PAGE_RATIO) > availH) w = Math.floor(availH / PAGE_RATIO);
@@ -1493,6 +1793,38 @@
       h("rect", { x: 3, y: 4, width: 18, height: 16, rx: 2 }),   // frame
       h("circle", { cx: 8.5, cy: 9.5, r: 1.5 }),                  // sun
       h("path", { d: "M21 16 L15.5 10.5 L6 20" })                 // mountain
+    );
+  }
+  
+  // Magnes: "wyrównywanie do punktów". Wyśrodkowany w pionie (y od 4 do 20),
+  // tak jak pozostałe ikony.
+  function MagnetIcon() {
+    return h("svg", { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+      h("path", { d: "M5 4 L5 13 A7 7 0 0 0 19 13 L19 4 L15 4 L15 13 A3 3 0 0 1 9 13 L9 4 Z" }), // podkowa
+      h("path", { d: "M5 8 L9 8 M15 8 L19 8" })                                                 // bieguny
+    );
+  }
+  // Obrazek z dwiema wyśrodkowanymi liniami tekstu pod spodem:
+  // "wyrównywanie tekstu do obrazów" (podpis pod obrazem).
+  function CaptionAlignIcon() {
+    return h("svg", { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+      h("rect", { x: 3, y: 2, width: 18, height: 12, rx: 2 }),   // ramka obrazka
+      h("circle", { cx: 8, cy: 6.5, r: 1.3 }),                   // słońce
+      h("path", { d: "M21 11 L16.5 7 L9 14" }),                  // góra
+      h("path", { d: "M6 18 L18 18" }),                          // 1. linia podpisu
+      h("path", { d: "M9 22 L15 22" })                           // 2. linia podpisu
+    );
+  }
+
+  // Miniatura rozkładówki z kropkami danej opcji (przyciski na pasku).
+  function AlignLayoutIcon({ index }) {
+    const pts = alignPoints(index);
+    const PW = 19, PH = 26, T = 2;
+    return h("svg", { width: 44, height: 30, viewBox: "0 0 44 30" },
+      [2, 23].map((x0) => h("g", { key: x0 },
+        h("rect", { x: x0, y: T, width: PW, height: PH, rx: 1.5, fill: "none", stroke: "currentColor", strokeWidth: 1.2 }),
+        pts.map((p, i) => h("circle", { key: i, cx: x0 + p.x * PW, cy: T + p.y * PH, r: 1.7, fill: "currentColor" }))
+      ))
     );
   }
 
@@ -2215,6 +2547,7 @@
       sel.removeAllRanges();
       sel.addRange(info.range);
       keepFormatAfterDelete(info.box, chain);   // keep the font/size/color for what's typed next
+      keepAnchored(info.box);                   // pole przypięte do kropki: wyśrodkuj po wycięciu
       updateFormatButtons(info.box);
     }
   }
@@ -2328,6 +2661,8 @@
         // Doesn't fit on the page: put both boxes back as they were.
         restoreSnapshot(box, snapTarget);
         if (snapSource) restoreSnapshot(src.box, snapSource);
+      } else if (src.box !== box) {
+        keepAnchored(src.box);   // tekst wyszedł z tego pola: wyśrodkuj je znowu
       }
       return;
     }
@@ -2514,13 +2849,126 @@
   }
 
   // ---- Keep text inside the page ------------------------------------------
+  // Środek pierwszej linii tekstu w polu, w pikselach od lewego górnego rogu
+  // pola: połowa szerokości i połowa wysokości tej linii. Pole puste:
+  // początek pierwszej linii (tam stoi kursor).
+  function firstLineCenter(box) {
+    const b = box.getBoundingClientRect();
+    const r = document.createRange();
+    r.selectNodeContents(box);
+    const rects = Array.from(r.getClientRects()).filter((q) => q.height > 0);
+    if (rects.length) {
+      // Wszystko, co zaczyna się wyżej niż kończy się najwyższy kawałek
+      // tekstu, leży w pierwszej linii (też przy różnych wielkościach liter).
+      const minBottom = Math.min(...rects.map((q) => q.bottom));
+      const line = rects.filter((q) => q.top < minBottom);
+      const left = Math.min(...line.map((q) => q.left));
+      const right = Math.max(...line.map((q) => q.right));
+      const top = Math.min(...line.map((q) => q.top));
+      const bottom = Math.max(...line.map((q) => q.bottom));
+      return { x: (left + right) / 2 - b.left, y: (top + bottom) / 2 - b.top };
+    }
+    const cs = getComputedStyle(box);
+    return {
+      // Wyśrodkowany tekst (podpis pod obrazem): kursor stoi na środku pola.
+      x: cs.textAlign === "center"
+        ? box.offsetWidth / 2
+        : box.clientLeft + parseFloat(cs.paddingLeft),
+      y: box.clientTop + parseFloat(cs.paddingTop) + BASE_FONT_SIZE * 1.3 * unitOf(box) / 2
+    };
+  }
+
+  // Pasek narzędzi pola (rozmiar, B, I, czcionka, kolor) ma się mieścić na
+  // stronie: przy prawej krawędzi przesuwa się w lewo, przy górnej
+  // krawędzi przechodzi pod pole.
+  const TOOLBAR_W = 262;   // szerokość paska (patrz .toolbar-strip)
+  const TOOLBAR_H = 31;    // wysokość paska razem z odstępem od pola
+  function placeToolbar(wrapper) {
+    const page = wrapper && wrapper.parentElement;
+    const box = wrapper && wrapper.querySelector(".textbox");
+    if (!page || !box || !page.clientWidth) return;   // strona niewidoczna
+    const left = wrapper.offsetLeft;
+    const shift = Math.max(Math.min(0, page.clientWidth - (left + TOOLBAR_W)), -left);
+    const below = wrapper.offsetTop < TOOLBAR_H;
+    const hgt = box.offsetHeight;
+    wrapper.style.setProperty("--tb-shift", shift + "px");
+    wrapper.style.setProperty("--tb-drop", below ? (hgt + TOOLBAR_H + 3) + "px" : "0px");
+    wrapper.style.setProperty("--tb-drop-strip", below ? (hgt + TOOLBAR_H) + "px" : "0px");
+  }
+
+  // Pole tekstowe przyciągnięte do kropki (data-anchor-x / -y): ustaw je tak,
+  // żeby jego środek był na tej kropce (ale całe pole zostaje na stronie).
+  // Wywoływane po każdej zmianie treści, więc pole rośnie równo w obie strony.
+  function keepAnchored(box) {
+    const ax = parseFloat(box.dataset.anchorX), ay = parseFloat(box.dataset.anchorY);
+    if (isNaN(ax) || isNaN(ay)) return;
+    const wrapper = box.parentElement;
+    const page = wrapper && wrapper.parentElement;
+    if (!page || !page.clientWidth || !page.clientHeight) return; // strona niewidoczna
+
+    const W = page.offsetWidth, H = page.offsetHeight;
+    // Na czas pomiaru cała szerokość strony jest dostępna, żeby tekst nie
+    // zawijał się tylko dlatego, że pole stoi teraz bliżej prawej krawędzi.
+    wrapper.style.left = "0px";
+    const w = box.offsetWidth, hgt = box.offsetHeight;
+
+        // Podpis pod obrazem: na kropce ma być środek PIERWSZEJ linii, nie całego pola.
+    const c = box.dataset.anchorLine ? firstLineCenter(box) : { x: w / 2, y: hgt / 2 };
+    const left = Math.min(Math.max(ax * W - c.x, 0), Math.max(page.clientWidth - w, 0));
+    // Podpis pod obrazem nigdy nie wchodzi na obraz (duża czcionka = niżej).
+    const wantTop = box.dataset.anchorImage ? captionTopPx(ay * H, c.y, W) : ay * H - c.y;
+    const top  = Math.min(Math.max(wantTop, 0), Math.max(page.clientHeight - hgt, 0));
+    wrapper.style.left = left + "px";
+    wrapper.style.top = top + "px";
+	placeToolbar(wrapper);
+  }
+  
+  // Ile miejsca (piksele strony) potrzebują pod obrazem przyklejone do niego
+  // podpisy: od dolnej krawędzi obrazu do dolnej krawędzi najniższego podpisu.
+  // 0, gdy obraz nie ma podpisów.
+  function captionRoomBelow(pageEl, imageId) {
+    const u = pageEl.offsetWidth / REF_PAGE_W;
+    let room = 0;
+    pageEl.querySelectorAll(`.textbox[data-anchor-image="${imageId}"]`).forEach((box) => {
+      if (!box.offsetHeight) return;   // pole ukryte
+      const line = firstLineCenter(box);
+      const gap = Math.max(CAPTION_GAP_UNITS * u - line.y, CAPTION_MIN_GAP_UNITS * u);
+      room = Math.max(room, gap + box.offsetHeight);
+    });
+    return Math.ceil(room);
+  }
+  // Zakres, w którym może stać kropka pod obrazem (x, piksele strony), żeby
+  // każdy przyklejony podpis dał się na niej wyśrodkować bez wychodzenia
+  // poza stronę. Obraz bez podpisów: bez ograniczeń.
+  function captionXRange(pageEl, imageId) {
+    let min = -Infinity, max = Infinity;
+    pageEl.querySelectorAll(`.textbox[data-anchor-image="${imageId}"]`).forEach((box) => {
+      if (!box.offsetWidth) return;   // pole ukryte
+      const c = firstLineCenter(box);
+      min = Math.max(min, c.x);
+      max = Math.min(max, pageEl.clientWidth - (box.offsetWidth - c.x));
+    });
+    return { min, max };
+  }
 
   // True if the box's bottom edge is still inside the page (border excluded).
+  // Podpis przyklejony do obrazu musi się zmieścić BEZ podsuwania go do góry
+  // (inaczej wszedłby na obraz): wtedy zmiana jest cofana albo tekst zmniejszany,
+  // tak samo jak przy zwykłym polu, które wychodzi poza stronę.
   function fitsInPage(box) {
+    keepAnchored(box);   // pole przyciągnięte do kropki: najpierw je wyśrodkuj
     const wrapper = box.parentElement;
     const page = wrapper && wrapper.parentElement;
     if (!wrapper || !page) return true;
-    return wrapper.offsetTop + box.offsetHeight <= page.clientHeight;
+    if (box.dataset.anchorImage && page.offsetHeight) {
+      const ay = parseFloat(box.dataset.anchorY);
+      const c = firstLineCenter(box);
+      if (captionTopPx(ay * page.offsetHeight, c.y, page.offsetWidth)
+          + box.offsetHeight > page.clientHeight + 0.5) return false;
+    }
+    const fits = wrapper.offsetTop + box.offsetHeight <= page.clientHeight;
+    placeToolbar(wrapper);   // pole mogło urosnąć: pasek pod nim przesuwa się razem
+    return fits;
   }
 
   // Shrinks a sized fragment (<span class="fs">) until the box fits in the page.
@@ -2666,6 +3114,7 @@
 
   function restoreSnapshot(box, snap) {
     box.innerHTML = snap.html;
+	keepAnchored(box);
     if (snap.caret !== null) setCaretOffset(box, snap.caret);
   }
 
@@ -2693,6 +3142,7 @@
       deletedChain = null;
       stripZwsp(box);
       updateFormatButtons(box);
+	  placeToolbar(box.parentElement);
     });
     box.addEventListener("compositionend", () => { check(); stripZwsp(box); });
     box.addEventListener("paste", (e) => pasteIntoBox(box, e));
@@ -2824,6 +3274,88 @@
 
     // Font color panel: { boxId, anchor, current, onApply } or null.
     const [colorPicker, setColorPicker] = useState(null);
+	
+    // ---- Narzędzie wyrównywania (magnes) ----------------------------------
+    // Niezależne od narzędzi tekstu / przesuwania: może działać razem z nimi.
+    const [alignOn, setAlignOn] = useState(false);
+    const [alignLayout, setAlignLayout] = useState(0);
+    // Dla natywnych listenerów (podpiętych raz).
+    const alignRef = useRef({ on: false, layout: 0 });
+    alignRef.current = { on: alignOn, layout: alignLayout };
+
+        // ---- Narzędzie "wyrównywanie tekstu do obrazów" ------------------------
+    // Działa razem z narzędziami tekstu / przesuwania, ale NIE razem
+    // z wyrównywaniem do punktów (i odwrotnie).
+    const [captionOn, setCaptionOn] = useState(false);
+    const captionRef = useRef(false);   // dla natywnych listenerów
+    captionRef.current = captionOn;
+
+    const toggleCaption = () => {
+      if (alignOn) return;              // wyrównywanie do punktów jest włączone
+      setCaptionOn(!captionOn);
+    };
+
+    const toggleAlign = () => {
+      if (captionOn) return;            // wyrównywanie do obrazów jest włączone
+      if (!alignOn) setAlignLayout(0);  // po każdym włączeniu: pierwsza opcja
+      setAlignOn(!alignOn);
+    };
+
+    // Przyciąganie do kropki, tylko gdy narzędzie jest włączone.
+    // Wszystkie wartości to ułamki strony.
+    const snapNear = (pageEl, left, top, wf, hf) => {
+      const a = alignRef.current;
+      return a.on ? snapToDot(pageEl, a.layout, left, top, wf, hf) : null;
+    };
+    // Przyciąganie pierwszej linii tekstu do kropki pod obrazem, tylko gdy
+    // narzędzie jest włączone. Tylko teksty tego używają (obrazy nie).
+    const snapCaption = (pageEl, cx, cy, offX, offY, boxW, boxH) => {
+      if (!captionRef.current || !pageEl) return null;
+      const key = pageEl.dataset.pageKey;
+      const imgs = imagesRef.current.filter((im) => im.page === key);
+      return snapToCaption(pageEl, imgs, cx, cy, offX, offY, boxW, boxH);
+    };
+
+    // Aktualne położenie pola wyśrodkowanego na kropce, odczytane z ekranu
+    // (podczas pisania przesuwa się ono bez zmiany stanu React).
+    const livePos = (b, el) => {
+      if (!b.anchor || !el) return {};
+      const wrapper = el.parentElement;
+      const pageEl = wrapper && wrapper.parentElement;
+      if (!pageEl || !pageEl.offsetWidth || !pageEl.offsetHeight) return {};
+      return {
+        left: wrapper.offsetLeft / pageEl.offsetWidth,
+        top:  wrapper.offsetTop / pageEl.offsetHeight
+      };
+    };
+
+    const commitBoxPos = (id, el) => {
+      const b = boxesRef.current.find((x) => x.id === id);
+      if (!b || !b.anchor) return;
+      keepAnchored(el);   // najpierw wyśrodkuj (rozmiar mógł się właśnie zmienić)
+      const pos = livePos(b, el);
+      if (pos.left === undefined) return;
+      setBoxes((prev) => prev.map((x) => x.id === id ? { ...x, ...pos } : x));
+    };
+	
+    // Po przesunięciu / zmianie rozmiaru obrazu: zapisz w stanie nowe
+    // położenie podpisów przyklejonych do niego (na ekranie już się przesunęły).
+    const commitImageFollowers = (imageId) => {
+      const updates = {};
+      boxesRef.current.forEach((b) => {
+        if (!b.anchor || b.anchor.imageId !== imageId) return;
+        const el = boxRefs.current[b.id];
+        if (!el) return;
+        const pos = livePos(b, el);
+        if (pos.left === undefined) return;
+        updates[b.id] = {
+          ...pos,
+          anchor: { ...b.anchor, x: parseFloat(el.dataset.anchorX), y: parseFloat(el.dataset.anchorY) }
+        };
+      });
+      if (!Object.keys(updates).length) return;
+      setBoxes((prev) => prev.map((b) => updates[b.id] ? { ...b, ...updates[b.id] } : b));
+    };
 
     // Pictures on pages: { id, page, src, left, top, w, h } (fractions of the page).
     const [images, setImages] = useState([]);
@@ -2922,18 +3454,10 @@
     // Check if current page is a cover (front or back)
     const isCurrentPageCover = () => page === 0 || page > pageKeys.length;
 
-    // Snapshot every box's live DOM content into state. Must be called
-    // right before a resize changes the flipbook's `key` — that remount
-    // destroys and recreates every textbox DOM node, and Surface only
-    // hydrates a fresh node from box.html, so whatever hasn't been
-    // captured into state at that instant would be lost. Captures raw
-    // innerHTML rather than plain text: that's exactly the markup
-    // the editing produced, so restoring it later needs no
-    // reinterpretation of line breaks and can't drift.
     const syncBoxesFromDOM = () => {
       setBoxes((prev) => prev.map((b) => {
         const el = boxRefs.current[b.id];
-        return el ? { ...b, html: el.innerHTML } : b;
+        return el ? { ...b, html: el.innerHTML, ...livePos(b, el) } : b;
       }));
     };
 
@@ -3243,8 +3767,11 @@
 
       const maxLeft = Math.max(pageEl.clientWidth / pageW - w, 0);
       const maxTop  = Math.max(pageEl.clientHeight / pageH - hgt, 0);
-      const left = Math.min(Math.max(fx - w / 2, 0), maxLeft);
-      const top  = Math.min(Math.max(fy - hgt / 2, 0), maxTop);
+      let left = Math.min(Math.max(fx - w / 2, 0), maxLeft);
+      let top  = Math.min(Math.max(fy - hgt / 2, 0), maxTop);
+      // Narzędzie wyrównywania: obok kropki środek obrazu ląduje na niej.
+      const snap = snapNear(pageEl, left, top, w, hgt);
+      if (snap) { left = snap.left; top = snap.top; }
 
       const id = ++imageIdRef.current;
       setImages((prev) => [...prev, { id, page: pageEl.dataset.pageKey, src: img.src, left, top, w, h: hgt }]);
@@ -3289,25 +3816,32 @@
       }));
     };
 
-    // Create a new box on a page/cover at the given viewport point. Also
-    // sweeps out any other still-tracked boxes that ended up empty — more
-    // reliable than counting on the outgoing box's blur event to fire
-    // before this is handled.
     const createBoxOnPage = (pageEl, clientX, clientY) => {
       const pageKey = pageEl.dataset.pageKey;
       const rect = pageEl.getBoundingClientRect();
-      const left = (clientX - rect.left) / rect.width;
-      const top  = (clientY - rect.top) / rect.height;
+      let left = (clientX - rect.left) / rect.width;
+      let top  = (clientY - rect.top) / rect.height;
 
-      // Not enough room between the click and the page's right / bottom
-      // edge for a box with a few letters of one default-size line: no box.
-      // Measured on the page itself (in page units), so it is always right
-      // for the current page size.
-      const u = pageEl.offsetWidth / REF_PAGE_W;
-      const x = clientX - rect.left;   // where the box's left / top edge will be,
-      const y = clientY - rect.top;    // inside the page border
-      if (x + NEW_BOX_MIN_W_UNITS * u + 2 > pageEl.clientWidth) return;
-      if (y + NEW_BOX_MIN_H_UNITS * u + 2 > pageEl.clientHeight) return;
+      // Narzędzie wyrównywania: kliknięcie obok kropki tworzy pole, którego
+      // środek jest na kropce i zostaje tam podczas pisania.
+      const snap = snapNear(pageEl, left, top, 0, 0);
+      // Kliknięcie obok kropki pod obrazem: pierwsza linia nowego pola
+      // będzie wyśrodkowana na tej kropce.
+      const cap = snap ? null
+        : snapCaption(pageEl, clientX - rect.left, clientY - rect.top, 0, 0, 0, 0);
+      const anchor = snap ? snap.dot : cap ? cap.dot : null;
+      if (anchor) {
+        left = anchor.x;
+        top = anchor.y;
+      } else {
+        // Not enough room between the click and the page's right / bottom
+        // edge for a box with a few letters of one default-size line: no box.
+        const u = pageEl.offsetWidth / REF_PAGE_W;
+        const x = clientX - rect.left;
+        const y = clientY - rect.top;
+        if (x + NEW_BOX_MIN_W_UNITS * u + 2 > pageEl.clientWidth) return;
+        if (y + NEW_BOX_MIN_H_UNITS * u + 2 > pageEl.clientHeight) return;
+      }
 
       const id = ++boxIdRef.current;
       focusIdRef.current = id;
@@ -3317,7 +3851,7 @@
           if (!hasText) delete boxRefs.current[b.id];
           return hasText;
         });
-        return [...kept, { id, page: pageKey, left, top, html: "", width: undefined }];
+        return [...kept, { id, page: pageKey, left, top, html: "", width: undefined, anchor }];
       });
     };
 
@@ -3360,6 +3894,8 @@
       // Measure the box once; it must not change size while being moved.
       const rect = el.getBoundingClientRect();
       const boxW = rect.width, boxH = rect.height;
+	        // Gdzie w polu jest środek jego pierwszej linii (do kropek pod obrazami).
+      const line = firstLineCenter(el);
 
       // If the text is currently wrapping, lock the box at its current width
       // so a new position can't rewrap it wider or narrower.
@@ -3374,11 +3910,13 @@
         if (naturalW > boxW + 0.5) lockedWidth = boxW / scaleW;
       }
 
-      const originLeft = box.left, originTop = box.top;
+      // Start z ekranu: pole wyśrodkowane na kropce mogło się przesunąć przy pisaniu.
+      const originLeft = wrapper.offsetLeft / scaleW, originTop = wrapper.offsetTop / scaleH;
       const maxLeft = Math.max((innerW - boxW) / scaleW, 0);
       const maxTop  = Math.max((innerH - boxH) / scaleH, 0);
 
       let nextLeft = originLeft, nextTop = originTop, moved = false;
+      let nextAnchor = box.anchor || null;
 
       // The wrapper is the box's layer, so that is what has to go on top.
       const originalZIndex = wrapper.style.zIndex;
@@ -3388,6 +3926,14 @@
         const p = ev.touches ? ev.touches[0] : ev;
         nextLeft = Math.min(Math.max(originLeft + (p.clientX - startX) / scaleW, 0), maxLeft);
         nextTop  = Math.min(Math.max(originTop  + (p.clientY - startY) / scaleH, 0), maxTop);
+		        const snap = snapNear(pageEl, nextLeft, nextTop, boxW / scaleW, boxH / scaleH);
+        // Kropka pod obrazem: środek pierwszej linii blisko niej = na niej.
+        const cap = snap ? null : snapCaption(pageEl,
+          nextLeft * scaleW + line.x, nextTop * scaleH + line.y,
+          line.x, line.y, boxW, boxH);
+        const hit = snap || cap;
+        nextAnchor = hit ? hit.dot : null;
+        if (hit) { nextLeft = hit.left; nextTop = hit.top; }
 
         if (!moved) {
           moved = true;
@@ -3401,7 +3947,7 @@
         wrapper.style.zIndex = originalZIndex;
         if (!moved) return;
         setBoxes((prev) => prev.map((b) =>
-          b.id === id ? { ...b, left: nextLeft, top: nextTop, width: lockedWidth } : b
+            b.id === id ? { ...b, left: nextLeft, top: nextTop, width: lockedWidth, anchor: nextAnchor } : b
         ));
       });
     };
@@ -3418,8 +3964,15 @@
       const imgW = img.w * scaleW, imgH = img.h * scaleH;
 
       const originLeft = img.left, originTop = img.top;
-      const maxLeft = Math.max((innerW - imgW) / scaleW, 0);
-      const maxTop  = Math.max((innerH - imgH) / scaleH, 0);
+	  // Podpis musi dać się wyśrodkować pod obrazem: środek obrazu tylko
+      // tam, gdzie podpis zmieści się na stronie w poziomie.
+      const xr = captionXRange(pageEl, id);
+      let minLeft = Math.max((xr.min - imgW / 2) / scaleW, 0);
+      let maxLeft = Math.min(Math.max((innerW - imgW) / scaleW, 0), (xr.max - imgW / 2) / scaleW);
+      if (minLeft > maxLeft) minLeft = maxLeft = originLeft;   // brak miejsca: bez ruchu w poziomie
+      // Pod obrazem musi się zmieścić przyklejony do niego podpis.
+      const below = captionRoomBelow(pageEl, id);
+      const maxTop  = Math.max((innerH - imgH - below) / scaleH, 0);
 	  
       let nextLeft = originLeft, nextTop = originTop, moved = false;
 
@@ -3427,8 +3980,12 @@
 
       trackPointer((ev) => {
         const p = ev.touches ? ev.touches[0] : ev;
-        nextLeft = Math.min(Math.max(originLeft + (p.clientX - startX) / scaleW, 0), maxLeft);
+        nextLeft = Math.min(Math.max(originLeft + (p.clientX - startX) / scaleW, minLeft), maxLeft);
         nextTop  = Math.min(Math.max(originTop  + (p.clientY - startY) / scaleH, 0), maxTop);
+		const snap = snapNear(pageEl, nextLeft, nextTop, img.w, img.h);
+        if (snap && snap.top <= maxTop && snap.left >= minLeft && snap.left <= maxLeft) {
+          nextLeft = snap.left; nextTop = snap.top;
+        }
         moved = true;
         layoutImageDom(pageEl, id, nextLeft * scaleW, nextTop * scaleH, imgW, imgH);
       }, () => {
@@ -3437,6 +3994,7 @@
         setImages((prev) => prev.map((im) =>
           im.id === id ? { ...im, left: nextLeft, top: nextTop } : im
         ));
+		commitImageFollowers(id);
       });
     };
 
@@ -3463,10 +4021,21 @@
 
       // Largest width that keeps the picture inside the page.
       const roomX = sx > 0 ? innerW - ax : ax;
-      const roomY = sy > 0 ? innerH - ay : ay;
-      const maxW = Math.max(Math.min(roomX, roomY * ratio), 1);
+      // Ciągnięcie w dół: pod obrazem musi zostać miejsce na jego podpis.
+      // Ciągnięcie w górę: dolna krawędź stoi w miejscu, więc podpis też.
+      const below = sy > 0 ? captionRoomBelow(pageEl, id) : 0;
+      const roomY = sy > 0 ? Math.max(innerH - ay - below, 0) : ay;
+            // Podpis ma zostać wyśrodkowany: środek obrazu (przesuwa się przy
+      // zmianie szerokości) tylko w zakresie, w którym podpis się mieści.
+      const xr = captionXRange(pageEl, id);
+      const capW   = sx > 0 ? 2 * (xr.max - ax) : 2 * (ax - xr.min);
+      const floorW = sx > 0 ? 2 * (xr.min - ax) : 2 * (ax - xr.max);
+      const maxW = Math.max(Math.min(roomX, roomY * ratio, capW), 1);
       // Shorter side at least MIN_IMAGE_SIDE (unless it already was smaller).
-      const minW = Math.min(ratio >= 1 ? MIN_IMAGE_SIDE * ratio : MIN_IMAGE_SIDE, w0, maxW);
+      const minW = Math.min(
+        Math.max(Math.min(ratio >= 1 ? MIN_IMAGE_SIDE * ratio : MIN_IMAGE_SIDE, w0), floorW),
+        maxW
+      );
 
       // Keep the resize cursor even when the mouse leaves the handle.
       const cursorClass = (sx * sy > 0) ? "resizing-nwse" : "resizing-nesw";
@@ -3500,6 +4069,7 @@
             ? { ...im, left: curL / scaleW, top: curT / scaleH, w: curW / scaleW, h: curH / scaleH }
             : im
         ));
+		commitImageFollowers(id);
       });
     };
 
@@ -3525,12 +4095,14 @@
       el.style.width = prevWidth;
       el.style.maxWidth = prevMaxWidth;
 
-      // Current rendered width, in the same units style.width now uses.
-      const originLeft = box.left;
+      const originLeft = wrapper.offsetLeft / pageW;
       const originWidth = el.offsetWidth / pageW;
       const originRight = originLeft + originWidth;
       // Allow shrinking, but never force a minimum wider than the text itself.
       const minWidth = Math.min(0.05, naturalWidth);
+	        // Podpis przyklejony do obrazu: szerokość zmienia się symetrycznie
+      // wokół kropki, więc podpis zostaje przyklejony i wyśrodkowany.
+      const isCaption = !!el.dataset.anchorImage;
 
       // True if the box, at this width, still ends above the page's bottom
       // edge. Narrower = more wrapped lines = taller box.
@@ -3549,14 +4121,27 @@
       el.style.zIndex = "10000";
 
       trackPointer((ev) => {
+	    if (!moved && !isCaption) {
+          delete el.dataset.anchorX;
+          delete el.dataset.anchorY;
+          delete el.dataset.anchorImage;
+        }
         const p = ev.touches ? ev.touches[0] : ev;
         const dx = (p.clientX - startX) / pageW;
 
-        // Left edge: right edge stays put, capped by the page's left edge.
-        // Right edge: left edge stays put, capped by the page's right edge.
-        let w = edge === "left" ? originWidth - dx : originWidth + dx;
-        const maxW = edge === "left" ? originRight : innerW / pageW - originLeft;
-        w = Math.max(minWidth, Math.min(w, naturalWidth, maxW));
+        let w;
+        if (isCaption) {
+          // Obie krawędzie ruszają się razem; podpis mieści się na stronie
+          // po obu stronach kropki (środka obrazu).
+          const cx = parseFloat(el.dataset.anchorX) * pageW;
+          const maxW = 2 * Math.min(cx, innerW - cx) / pageW;
+          w = originWidth + (edge === "left" ? -2 * dx : 2 * dx);
+          w = Math.max(minWidth, Math.min(w, naturalWidth, maxW));
+        } else {
+          w = edge === "left" ? originWidth - dx : originWidth + dx;
+          const maxW = edge === "left" ? originRight : innerW / pageW - originLeft;
+          w = Math.max(minWidth, Math.min(w, naturalWidth, maxW));
+        }
 
         // Narrowing would push the bottom below the page: find the narrowest
         // width that still fits and stop there.
@@ -3571,16 +4156,29 @@
         lastGoodWidth = w;
 
         nextWidth = w;
-        nextLeft = edge === "left" ? originRight - w : originLeft;
         moved = true;
-
-        wrapper.style.left = (nextLeft * pageW) + "px";
         el.style.width = el.style.maxWidth = (nextWidth * pageW) + "px";
-      }, () => {
+        if (isCaption) {
+          keepAnchored(el);   // wyśrodkuj pod obrazem przy nowej szerokości
+        } else {
+          nextLeft = edge === "left" ? originRight - w : originLeft;
+          wrapper.style.left = (nextLeft * pageW) + "px";
+        }
+		placeToolbar(wrapper);
+    }, () => {
         el.style.zIndex = originalZIndex;
         if (!moved) return;
+        if (isCaption) {
+          // Podpis zostaje przyklejony: zapisz nową szerokość i położenie z ekranu.
+          const left = wrapper.offsetLeft / pageW;
+          const top = wrapper.offsetTop / pageContainer.offsetHeight;
+          setBoxes((prev) => prev.map((b) =>
+            b.id === id ? { ...b, left, top, width: nextWidth } : b
+          ));
+          return;
+        }
         setBoxes((prev) => prev.map((b) =>
-          b.id === id ? { ...b, left: nextLeft, width: nextWidth } : b
+            b.id === id ? { ...b, left: nextLeft, width: nextWidth, anchor: null } : b
         ));
       });
     };
@@ -3630,7 +4228,8 @@
         html: el.innerHTML,            // live DOM, not the possibly stale box.html
         widthPx,
         boxW: widthPx !== undefined ? widthPx : el.offsetWidth,
-        boxH: el.offsetHeight
+        boxH: el.offsetHeight,
+		line: firstLineCenter(el)
       };
     };
 
@@ -3666,8 +4265,10 @@
       const scaleW = pageEl.offsetWidth, scaleH = pageEl.offsetHeight;
       const maxLeft = Math.max(pageEl.clientWidth / scaleW - clip.w, 0);
       const maxTop  = Math.max(pageEl.clientHeight / scaleH - clip.h, 0);
-      const left = Math.min(Math.max((x - rect.left) / rect.width, 0), maxLeft);
-      const top  = Math.min(Math.max((y - rect.top) / rect.height, 0), maxTop);
+      let left = Math.min(Math.max((x - rect.left) / rect.width, 0), maxLeft);
+      let top  = Math.min(Math.max((y - rect.top) / rect.height, 0), maxTop);
+      const snap = snapNear(pageEl, left, top, clip.w, clip.h);
+      if (snap) { left = snap.left; top = snap.top; }
 
       const id = ++imageIdRef.current;
       setImages((prev) => [...prev, {
@@ -3708,8 +4309,14 @@
       const innerW = pageEl.clientWidth, innerH = pageEl.clientHeight;
       const maxLeft = Math.max((innerW - clip.boxW) / scaleW, 0);
       const maxTop  = Math.max((innerH - clip.boxH) / scaleH, 0);
-      const left = Math.min(Math.max((x - rect.left) / rect.width, 0), maxLeft);
-      const top  = Math.min(Math.max((y - rect.top) / rect.height, 0), maxTop);
+      let left = Math.min(Math.max((x - rect.left) / rect.width, 0), maxLeft);
+      let top  = Math.min(Math.max((y - rect.top) / rect.height, 0), maxTop);
+      const snap = snapNear(pageEl, left, top, clip.boxW / scaleW, clip.boxH / scaleH);
+      const cap = snap ? null : snapCaption(pageEl,
+        left * scaleW + clip.line.x, top * scaleH + clip.line.y,
+        clip.line.x, clip.line.y, clip.boxW, clip.boxH);
+      const hit = snap || cap;
+      if (hit) { left = hit.left; top = hit.top; }
 
       const id = ++boxIdRef.current;
       setBoxes((prev) => [...prev, {
@@ -3717,7 +4324,8 @@
         page: pageEl.dataset.pageKey,
         left, top,
         html: clip.html,
-        width: clip.widthPx !== undefined ? clip.widthPx / scaleW : undefined
+        width: clip.widthPx !== undefined ? clip.widthPx / scaleW : undefined,
+        anchor: hit ? hit.dot : null
       }]);
       selectBox(id); // repeated Ctrl+V continues from the fresh copy
     };
@@ -3821,8 +4429,10 @@
         }
         pendingFixCount = 0;
 
-        // Caret moved away from an unused pending size / font / bold / italic: forget it.
-        if (range.collapsed) removePendingSpans(boxEl, range.startContainer);
+        if (range.collapsed) {
+          removePendingSpans(boxEl, range.startContainer);
+          keepAnchored(boxEl);   // pole mogło się zmniejszyć: wyśrodkuj je znowu
+        }
 
         // Remember the caret too, not only selections, so a size typed into
         // the input can be applied at the caret.
@@ -4033,7 +4643,10 @@
       pageH: size.h,
       selectedId,
       selectedImageId,
-      openColorPicker
+      openColorPicker,
+      alignDots: alignOn ? alignPoints(alignLayout) : null,
+      onBoxPos: commitBoxPos,
+	  captionOn
     });
 
     // Tooltip note for the buttons that don't work on a cover.
@@ -4071,7 +4684,13 @@
             maxShadowOpacity: 0.5,
             onFlip: (e) => setPage(e.data),
             onChangeOrientation: (e) => setOrientation(e.data),
-            onInit: unfreezeBook,
+            onInit: () => {
+              unfreezeBook();
+              // Strony mają już swoje prawdziwe rozmiary: paski narzędzi na miejsce.
+              requestAnimationFrame(() => {
+                document.querySelectorAll(".textbox-wrapper").forEach(placeToolbar);
+              });
+            },
             ref: bookRef
           },
             h(Surface, { key: "c1", ...surfaceProps("c1", true) }),
@@ -4081,32 +4700,49 @@
           h("div", { className: "toggle-row" },
             h("div", {
               className: "toggle-btn" + (tool === TOOL_TEXT ? " active" : "") + (isCurrentPageCover() ? " disabled" : ""),
-              title: "Tekst: kliknij stronę, aby dodać pole tekstowe" + coverNote,
+              "data-tip": "Tekst: kliknij stronę, aby dodać pole tekstowe" + coverNote,
               onClick: toggleTextMode
             }, "A"),
             h("div", {
               className: "toggle-btn" + (tool === TOOL_MOVE ? " active" : "") + (isCurrentPageCover() ? " disabled" : ""),
-              title: "Przesuwanie i kopiowanie tekstu oraz obrazów" + coverNote,
+              "data-tip": "Przesuwanie i kopiowanie tekstu oraz obrazów" + coverNote,
               onClick: toggleMoveMode
             }, h(MoveIcon)),
             // Adding pages also works on the covers (front = beginning, back = end).
             h("div", {
               className: "toggle-btn",
-              title: "Dodaj dwie strony",
+              "data-tip": "Dodaj dwie strony",
               onClick: addPages
             }, h(AddPageIcon)),
             // Delete pages: a plain button, never stays selected.
             h("div", {
               className: "toggle-btn" + (isCurrentPageCover() ? " disabled" : ""),
-              title: "Usuń wyświetlane strony" + coverNote,
+              "data-tip": "Usuń wyświetlane strony" + coverNote,
               onClick: openDeleteDialog
             }, h(DeletePageIcon)),
             // Add an image: never stays selected, works on any spread.
             h("div", {
               className: "toggle-btn",
-              title: "Dodaj obraz",
+              "data-tip": "Dodaj obraz",
               onClick: openImageDialog
-            }, h(AddImageIcon))
+            }, h(AddImageIcon)),
+                        // Wyrównywanie do punktów: działa razem z innymi narzędziami,
+            // ale nie razem z wyrównywaniem do obrazów.
+            h("div", {
+              className: "toggle-btn" + (alignOn ? " active" : "") + (captionOn ? " disabled" : ""),
+              "data-tip": "Wyrównywanie do punktów"
+                + (captionOn ? " (niedostępne, gdy włączone jest wyrównywanie tekstu do obrazów)" : ""),
+              onMouseDown: (e) => e.preventDefault(),
+              onClick: toggleAlign
+            }, h(MagnetIcon)),
+            // Wyrównywanie tekstu do obrazów: kropki pod obrazami.
+            h("div", {
+              className: "toggle-btn" + (captionOn ? " active" : "") + (alignOn ? " disabled" : ""),
+              "data-tip": "Wyrównywanie tekstu do obrazów"
+                + (alignOn ? " (niedostępne, gdy włączone jest wyrównywanie do punktów)" : ""),
+              onMouseDown: (e) => e.preventDefault(),
+              onClick: toggleCaption
+            }, h(CaptionAlignIcon))
           ),
           tool === TOOL_MOVE && h("div", { className: "move-hint" },
             "Aby skopiować tekst lub obraz, kliknij go, a następnie użyj",
@@ -4114,7 +4750,9 @@
             h("kbd", null, "Ctrl + C"),
             " i ",
             h("kbd", null, "Ctrl + V"),
+			".",
             h("br"),
+			h("br"),
             "Aby zmienić rozmiar obrazu, przeciągnij jeden z jego rogów."
           ),
           pendingImage && h("div", { className: "move-hint" },
@@ -4181,6 +4819,19 @@
         )
       ),
       h("div", { className: "toast" + (toastVisible ? " visible" : "") + (toastQuick ? " quick" : "") }, toastText),
+	  // Pasek opcji wyrównania: widoczny tak długo, jak narzędzie jest włączone.
+      h("div", {
+        className: "align-bar" + (alignOn ? " visible" : ""),
+        // Kliknięcie paska nie zabiera fokusu z edytowanego tekstu.
+        onMouseDown: (e) => e.preventDefault()
+      },
+        ALIGN_LAYOUTS.map((l, i) => h("div", {
+          key: i,
+          className: "align-option" + (i === alignLayout ? " active" : ""),
+          title: l.title,
+          onClick: () => setAlignLayout(i)
+        }, h(AlignLayoutIcon, { index: i })))
+      ),
       colorPicker && h(ColorPicker, {
         key: colorPicker.boxId,
         anchor: colorPicker.anchor,
