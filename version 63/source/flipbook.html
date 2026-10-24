@@ -439,9 +439,6 @@
   .toggle-btn.active.disabled svg {
     stroke: #fff;
   }
-  /* Stos podpowiedzi przy prawym dolnym rogu książki. Padding 4px to miejsce
-     na cień podpowiedzi (overflow: hidden by go uciął); bottom i margin-left
-     są o te 4px przesunięte, więc podpowiedzi stoją dokładnie przy rogu. */
   .hint-stack {
     position: absolute;
     left: 100%;
@@ -767,6 +764,44 @@
     opacity: 0;
     visibility: hidden;
     transition: none;
+  }
+  /* "Zapisz" / "Otwórz": przy lewym górnym rogu książki, na zewnątrz,
+     górną krawędzią równo z górną krawędzią książki. */
+  .file-row {
+    position: absolute;
+    top: 0;
+    right: 100%;
+    margin-right: 14px;
+    display: flex;
+    gap: 8px;
+    z-index: 10;
+  }
+  .file-btn {
+    height: 32px;
+    padding: 0 12px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    color: #333;
+    font-size: 13px;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  }
+  .file-btn:hover { background: #eee; }
+  /* "Zapisz", gdy nie ma żadnych zmian do zapisania. */
+  .file-btn.disabled,
+  .file-btn.disabled:hover {
+    cursor: default;
+    background: #fafafa;
+    border-color: #e6e6e6;
+    color: #bbb;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.075);
   }
 </style>
 </head>
@@ -1735,6 +1770,7 @@
       flip.on("flip", forward("onFlip"));
       flip.on("changeOrientation", forward("onChangeOrientation"));
       flip.on("init", forward("onInit"));
+	  flip.on("changeState", forward("onChangeState"));
       flip.loadFromHTML(Array.from(el.children).filter((c) => c.classList.contains("page")));
       flipRef.current = flip;
     }, []);
@@ -3161,6 +3197,140 @@
     box.addEventListener("paste", (e) => pasteIntoBox(box, e));
   }
 
+  // ---- Zapisywanie i otwieranie plików --------------------------------------
+  // Pliki czyta i zapisuje program (main.cpp), bo tylko on zna ich położenie
+  // na dysku. Strona wysyła mu tekst "polecenie\ndane" i dostaje odpowiedzi
+  // w tej samej postaci.
+
+  const FILE_APP = "KronikaSzkolna";
+  const FILE_VERSION = 1;
+
+  // false, gdy strona nie działa w programie (np. otwarta w przeglądarce).
+  function hostPost(text) {
+    const wv = window.chrome && window.chrome.webview;
+    if (!wv) return false;
+    wv.postMessage(text);
+    return true;
+  }
+
+  // Treść pola bez niewidocznych znaków i bez pustych, nieużytych formatów.
+  function cleanBoxHtml(html) {
+    const t = document.createElement("template");
+    t.innerHTML = html || "";
+    Array.from(t.content.querySelectorAll(PENDING_SELECTOR)).reverse().forEach((el) => {
+      if (el.textContent.replace(/\u200B/g, "") === "" && !el.querySelector("br")) el.remove();
+    });
+    const holder = document.createElement("div");
+    holder.appendChild(t.content);
+    return holder.innerHTML.replace(/\u200B/g, "");
+  }
+
+  function htmlHasText(html) {
+    const t = document.createElement("template");
+    t.innerHTML = html || "";
+    return t.content.textContent.replace(/\u200B/g, "").trim().length > 0;
+  }
+
+  // Treść pola z pliku: zostają tylko pogrubienie, kursywa, rozmiar,
+  // czcionka i kolor. Wszystko inne (skrypty, linki, obrazki...) znika.
+  const XHTML_NS = "http://www.w3.org/1999/xhtml";
+  const ALLOWED_TAGS = new Set(["B", "STRONG", "I", "EM", "SPAN", "BR"]);
+  const DROPPED_TAGS = new Set(["script", "style", "template", "iframe", "object", "embed", "noscript"]);
+  function sanitizeBoxHtml(html) {
+    const t = document.createElement("template");
+    t.innerHTML = typeof html === "string" ? html : "";
+    Array.from(t.content.querySelectorAll("*")).reverse().forEach((el) => {
+      if (el.namespaceURI !== XHTML_NS || !ALLOWED_TAGS.has(el.nodeName)) {
+        if (DROPPED_TAGS.has(el.localName)) el.remove();
+        else el.replaceWith(...el.childNodes);
+        return;
+      }
+      const fs = el.style.fontSize, ff = el.style.fontFamily, c = el.style.color;
+      const cls = el.nodeName === "SPAN" ? ["fs", "ff", "fc"].filter((k) => el.classList.contains(k)) : [];
+      Array.from(el.attributes).forEach((a) => el.removeAttribute(a.name));
+      if (cls.length) el.className = cls.join(" ");
+      if (fs) el.style.fontSize = fs;
+      if (ff) el.style.fontFamily = ff;
+      if (c) el.style.color = c;
+    });
+    const holder = document.createElement("div");
+    holder.appendChild(t.content);
+    return holder.innerHTML;
+  }
+
+  // "Odcisk" zawartości do sprawdzania, czy coś się zmieniło. Strony są
+  // liczone po kolei (dodanie i usunięcie stron nic nie zmienia), położenie
+  // pola przypiętego do kropki wynika z kropki.
+  function docSnapshot(doc) {
+    const index = new Map(doc.pageKeys.map((k, i) => [k, i]));
+    const pg = (k) => (index.has(k) ? index.get(k) : k);   // okładki: "c1" / "c2"
+    const r = (n) => (typeof n === "number" ? Math.round(n * 1e5) / 1e5 : null);
+    return JSON.stringify({
+      pages: doc.pageKeys.length,
+      boxes: doc.boxes.map((b) => b.anchor
+        ? [pg(b.page), r(b.width), b.html, r(b.anchor.x), r(b.anchor.y), !!b.anchor.line, b.anchor.imageId ?? null]
+        : [pg(b.page), r(b.width), b.html, r(b.left), r(b.top)]),
+      images: doc.images.map((im) => [im.id, pg(im.page), r(im.left), r(im.top), r(im.w), r(im.h)])
+    });
+  }
+
+  // Tekst pliku -> zawartość kroniki, albo null, jeśli to nie jest plik kroniki.
+  function parseDocument(text) {
+    let d;
+    try { d = JSON.parse(text); } catch (e) { return null; }
+    if (!d || typeof d !== "object" || d.app !== FILE_APP) return null;
+    if (typeof d.version !== "number" || d.version < 1 || d.version > FILE_VERSION) return null;
+
+    const isNum = (n) => typeof n === "number" && isFinite(n);
+    const isId = (n) => Number.isInteger(n) && n > 0;
+
+    if (!Array.isArray(d.pageKeys) || d.pageKeys.length % 2 !== 0) return null;
+    if (!d.pageKeys.every((k) => typeof k === "string" && /^p\d+$/.test(k))) return null;
+    const keys = new Set(d.pageKeys);
+    if (keys.size !== d.pageKeys.length) return null;
+    const onPage = (k) => keys.has(k) || k === "c1" || k === "c2";
+    if (!Array.isArray(d.images) || !Array.isArray(d.boxes)) return null;
+
+    const imageIds = new Set();
+    const images = [];
+    for (const im of d.images) {
+      if (!im || !isId(im.id) || imageIds.has(im.id) || !onPage(im.page)) return null;
+      if (typeof im.src !== "string" || !im.src.startsWith("data:image/")) return null;
+      if (![im.left, im.top, im.w, im.h].every(isNum) || im.w <= 0 || im.h <= 0) return null;
+      imageIds.add(im.id);
+      images.push({ id: im.id, page: im.page, src: im.src, left: im.left, top: im.top, w: im.w, h: im.h });
+    }
+
+    const boxIds = new Set();
+    const boxes = [];
+    for (const b of d.boxes) {
+      if (!b || !isId(b.id) || boxIds.has(b.id) || !onPage(b.page)) return null;
+      if (!isNum(b.left) || !isNum(b.top) || typeof b.html !== "string") return null;
+      if (b.width != null && !(isNum(b.width) && b.width > 0)) return null;
+      let anchor = null;
+      if (b.anchor) {
+        const a = b.anchor;
+        if (!isNum(a.x) || !isNum(a.y)) return null;
+        anchor = { x: a.x, y: a.y, line: !!a.line };
+        if (a.imageId != null) {
+          if (imageIds.has(a.imageId)) anchor.imageId = a.imageId;
+          else anchor = null;   // obrazu już nie ma: zwykłe pole
+        }
+      }
+      const html = cleanBoxHtml(sanitizeBoxHtml(b.html));
+      if (!htmlHasText(html)) continue;
+      boxIds.add(b.id);
+      boxes.push({ id: b.id, page: b.page, left: b.left, top: b.top,
+                   width: isNum(b.width) ? b.width : undefined, anchor, html });
+    }
+
+    let maxKey = 0;
+    d.pageKeys.forEach((k) => { maxKey = Math.max(maxKey, parseInt(k.slice(1), 10)); });
+    const nextPageNum = Math.max(maxKey + 1, Number.isInteger(d.nextPageNum) ? d.nextPageNum : 0);
+
+    return { app: FILE_APP, version: FILE_VERSION, pageKeys: d.pageKeys.slice(), nextPageNum, boxes, images };
+  }
+
   function App() {
     const bookRef = useRef(null);
     const wrapRef = useRef(null);
@@ -3305,11 +3475,13 @@
 
     const toggleCaption = () => {
       if (alignOn) return;              // wyrównywanie do punktów jest włączone
+	  if (coverLock) return; // okładka: narzędzie niedostępne
       setCaptionOn(!captionOn);
     };
 
     const toggleAlign = () => {
       if (captionOn) return;            // wyrównywanie do obrazów jest włączone
+      if (coverLock) return; // okładka: narzędzie niedostępne
       if (!alignOn) setAlignLayout(0);  // po każdym włączeniu: pierwsza opcja
       setAlignOn(!alignOn);
     };
@@ -3466,7 +3638,14 @@
 
     // Check if current page is a cover (front or back)
     const isCurrentPageCover = () => page === 0 || page > pageKeys.length;
-
+    // Książka właśnie się zamyka (przewracanie, które skończy się na okładce).
+    const [closing, setClosing] = useState(false);
+    // Kierunek ostatnio rozpoczętego przewracania: "next" albo "prev".
+    const flipDirRef = useRef("next");
+    // Okładka albo zamykanie książki: narzędzia blokują się,
+    // a podpowiedzi chowają od razu.
+    const coverLock = isCurrentPageCover() || closing;
+    const hideHints = coverLock;
     const syncBoxesFromDOM = () => {
       setBoxes((prev) => prev.map((b) => {
         const el = boxRefs.current[b.id];
@@ -3536,18 +3715,18 @@
     };
 
     const toggleTextMode = () => {
-      if (isCurrentPageCover()) return;
+      if (coverLock) return;
       selectTool(TOOL_TEXT);
     };
     const toggleMoveMode = () => {
-      if (isCurrentPageCover()) return;
+      if (coverLock) return;
       selectTool(TOOL_MOVE);
     };
 
     // ---- Delete the currently displayed spread -----------------------------
 
     const openDeleteDialog = () => {
-      if (isCurrentPageCover() || dialogOpenRef.current) return;
+      if (coverLock || dialogOpenRef.current) return;
 
       // Commit whatever is being typed and drop any selection first.
       const current = document.activeElement;
@@ -3610,17 +3789,11 @@
       setPage(next);                 // also feeds startPage via pageRef
       setBookVersion((v) => v + 1);  // remount the book with the new pages
     };
-
-    // ---- Add two pages -------------------------------------------------------
-    // Front cover: the new pages go at the very beginning.
-    // Back cover:  the new pages go at the very end.
-    // Anywhere else: right after the currently displayed spread.
-    // Works even when the book has no inner pages left.
-
+	
     const addPages = () => {
       if (dialogOpenRef.current) return;
-
-      // Commit whatever is being typed and drop any selection first.
+      // Okładka: niedostępne, chyba że książka nie ma już żadnych stron.
+      if (coverLock && pageKeys.length > 0) return;
       const current = document.activeElement;
       if (current && current.isContentEditable) current.blur();
       freezeBook();
@@ -3666,7 +3839,7 @@
 
     const openImageDialog = () => {
       if (dialogOpenRef.current || imageDialogOpenRef.current) return;
-
+      if (coverLock) return;
       // Commit whatever is being typed; no tool stays active.
       const current = document.activeElement;
       if (current && current.isContentEditable) current.blur();
@@ -3790,6 +3963,241 @@
       setImages((prev) => [...prev, { id, page: pageEl.dataset.pageKey, src: img.src, left, top, w, h: hgt }]);
       setPendingImage(null);
     };
+
+    // ---- Zapisywanie i otwieranie plików -----------------------------------
+
+    const pageKeysRef = useRef(pageKeys);
+    pageKeysRef.current = pageKeys;
+
+    // Czy kronika jest już plikiem na dysku (samą ścieżkę zna main.cpp).
+    const [hasFile, setHasFile] = useState(false);
+    const hasFileRef = useRef(false);
+
+    // Zawartość z chwili ostatniego zapisu / otwarcia. Na starcie: pusta kronika.
+    const baselineRef = useRef(null);
+    if (baselineRef.current === null) {
+      baselineRef.current = docSnapshot({ pageKeys, boxes: [], images: [] });
+    }
+    const [dirty, setDirty] = useState(false);   // są zmiany, których nie ma w pliku
+    const dirtyRef = useRef(false);
+    const fileBusyRef = useRef(false);           // czeka na odpowiedź main.cpp
+    const pendingSaveRef = useRef(null);         // { snap, isNew } wysłanego zapisu
+
+    const [openDialogOpen, setOpenDialogOpen] = useState(false);
+    const openDialogOpenRef = useRef(false);
+    const [closeDialogOpen, setCloseDialogOpen] = useState(false);
+    const closeDialogOpenRef = useRef(false);
+
+    // Cała kronika w postaci zapisywanej do pliku. Treść pól z ekranu
+    // (stan React bywa nieaktualny podczas pisania).
+    const buildDoc = () => ({
+      app: FILE_APP,
+      version: FILE_VERSION,
+      pageKeys: pageKeysRef.current.slice(),
+      nextPageNum: nextPageNumRef.current,
+      boxes: boxesRef.current.map((b) => {
+        const el = boxRefs.current[b.id];
+        return {
+          id: b.id, page: b.page, left: b.left, top: b.top, width: b.width,
+          anchor: b.anchor || null,
+          html: cleanBoxHtml(el ? el.innerHTML : b.html),
+          ...livePos(b, el)
+        };
+      }).filter((b) => htmlHasText(b.html)),
+      images: imagesRef.current.map((im) => ({
+        id: im.id, page: im.page, src: im.src, left: im.left, top: im.top, w: im.w, h: im.h
+      }))
+    });
+
+    // Porównuje to, co jest na ekranie, z ostatnio zapisaną / otwartą zawartością.
+    const checkDirty = () => {
+      const d = docSnapshot(buildDoc()) !== baselineRef.current;
+      if (d !== dirtyRef.current) {
+        dirtyRef.current = d;
+        setDirty(d);
+      }
+      return d;
+    };
+
+    const blurEditing = () => {
+      const a = document.activeElement;
+      if (a && a.isContentEditable) a.blur();
+    };
+
+    const anyDialogOpen = () => dialogOpenRef.current || imageDialogOpenRef.current
+      || openDialogOpenRef.current || closeDialogOpenRef.current;
+
+    // "Zapisz" / Ctrl+S. Jeszcze nie plik: main.cpp zapyta o miejsce i nazwę.
+    // Już plik: zapisuje zmiany, ale tylko jeśli jakieś są.
+    const requestSave = () => {
+      if (fileBusyRef.current || anyDialogOpen()) return;
+      const doc = buildDoc();
+      const snap = docSnapshot(doc);
+      if (hasFileRef.current && snap === baselineRef.current) return;   // nic do zapisania
+      if (!hostPost("save\n" + JSON.stringify(doc))) {
+        showToast("Zapisywanie działa tylko w programie Kronika szkolna");
+        return;
+      }
+      fileBusyRef.current = true;
+      pendingSaveRef.current = { snap, isNew: !hasFileRef.current };
+    };
+
+    const startOpen = () => {
+      if (hostPost("open")) fileBusyRef.current = true;
+      else showToast("Otwieranie działa tylko w programie Kronika szkolna");
+    };
+
+    // "Otwórz": okno z ostrzeżeniem tylko wtedy, gdy coś można stracić.
+    const requestOpen = () => {
+      if (fileBusyRef.current || anyDialogOpen()) return;
+      if (!checkDirty()) { startOpen(); return; }
+      blurEditing();
+      openDialogOpenRef.current = true;
+      setOpenDialogOpen(true);
+    };
+    const closeOpenDialog = () => {
+      openDialogOpenRef.current = false;
+      setOpenDialogOpen(false);
+    };
+    const confirmOpen = () => {
+      closeOpenDialog();
+      startOpen();
+    };
+
+    const closeCloseDialog = () => {
+      closeDialogOpenRef.current = false;
+      setCloseDialogOpen(false);
+    };
+    const confirmCloseApp = () => {
+      closeCloseDialog();
+      hostPost("close");
+    };
+
+    // Otwarty plik całkowicie zastępuje obecną kronikę.
+    const applyDocument = (doc) => {
+      blurEditing();
+      setColorPicker(null);
+      toolRef.current = TOOL_NONE;
+      setTool(TOOL_NONE);
+      selectBox(null);
+      setPendingImage(null);
+      savedRangeRef.current = null;
+      setFragmentHighlight(null);
+      focusIdRef.current = null;
+      refocusRef.current = null;
+      clipboardRef.current = null;   // skopiowany element należał do poprzedniej kroniki
+      freezeBook();
+
+      boxIdRef.current = doc.boxes.reduce((m, b) => Math.max(m, b.id), 0);
+      imageIdRef.current = doc.images.reduce((m, im) => Math.max(m, im.id), 0);
+      nextPageNumRef.current = doc.nextPageNum;
+
+      setBoxes(doc.boxes);
+      setImages(doc.images);
+      setPageKeys(doc.pageKeys);
+      setPage(0);                    // otwarta kronika zaczyna się od okładki
+      setClosing(false);
+      setBookVersion((v) => v + 1);
+
+      baselineRef.current = docSnapshot(doc);
+      dirtyRef.current = false;
+      setDirty(false);
+    };
+
+    // Odpowiedzi i polecenia od main.cpp.
+    const hostHandlerRef = useRef(null);
+    hostHandlerRef.current = (cmd, rest) => {
+      if (cmd === "saveShortcut") { requestSave(); return; }
+
+      if (cmd === "saved") {
+        fileBusyRef.current = false;
+        const p = pendingSaveRef.current;
+        pendingSaveRef.current = null;
+        if (p) baselineRef.current = p.snap;
+        hasFileRef.current = true;
+        setHasFile(true);
+        checkDirty();
+        showToast(p && p.isNew ? "Plik został zapisany" : "Zmiany zostały zapisane");
+        return;
+      }
+      if (cmd === "saveCancelled") { fileBusyRef.current = false; pendingSaveRef.current = null; return; }
+      if (cmd === "saveFailed") {
+        fileBusyRef.current = false;
+        pendingSaveRef.current = null;
+        showToast("Nie udało się zapisać pliku");
+        return;
+      }
+
+      if (cmd === "opened") {
+        fileBusyRef.current = false;
+        const doc = parseDocument(rest);
+        if (!doc) {
+          hostPost("openRejected");
+          showToast("Nie udało się otworzyć pliku");
+          return;
+        }
+        hostPost("openAccepted");
+        applyDocument(doc);
+        hasFileRef.current = true;
+        setHasFile(true);
+        return;
+      }
+      if (cmd === "openCancelled") { fileBusyRef.current = false; return; }
+      if (cmd === "openFailed") {
+        fileBusyRef.current = false;
+        showToast("Nie udało się otworzyć pliku");
+        return;
+      }
+
+      // Zamykanie programu: okno tylko wtedy, gdy coś można stracić.
+      if (cmd === "confirmClose") {
+        if (!checkDirty()) { hostPost("close"); return; }
+        hostPost("closeAsked");
+        if (closeDialogOpenRef.current) return;
+        blurEditing();
+        setColorPicker(null);
+        closeDeleteDialog();
+        closeImageDialog();
+        closeOpenDialog();
+        closeDialogOpenRef.current = true;
+        setCloseDialogOpen(true);
+      }
+    };
+
+    useEffect(() => {
+      const wv = window.chrome && window.chrome.webview;
+      if (!wv) return;
+      const onMessage = (e) => {
+        const msg = typeof e.data === "string" ? e.data : "";
+        const nl = msg.indexOf("\n");
+        hostHandlerRef.current(nl < 0 ? msg : msg.slice(0, nl), nl < 0 ? "" : msg.slice(nl + 1));
+      };
+      wv.addEventListener("message", onMessage);
+      return () => wv.removeEventListener("message", onMessage);
+    }, []);
+
+    // main.cpp musi wiedzieć, czy przy zamykaniu jest coś do stracenia.
+    useEffect(() => { hostPost("dirty\n" + (dirty ? "1" : "0")); }, [dirty]);
+
+    // Zmiany w stanie (pola, obrazy, strony)...
+    useEffect(() => { checkDirty(); }, [boxes, images, pageKeys]);
+
+    // ...i zmiany robione wprost na ekranie (pisanie, pogrubienie, kolor...),
+    // sprawdzane co najwyżej co 150 ms.
+    useEffect(() => {
+      const target = flipbookContainerRef.current;
+      if (!target) return;
+      let timer = 0;
+      const schedule = () => {
+        if (!timer) timer = setTimeout(() => { timer = 0; checkDirty(); }, 150);
+      };
+      const mo = new MutationObserver(schedule);
+      mo.observe(target, {
+        subtree: true, childList: true, characterData: true,
+        attributes: true, attributeFilter: ["style"]
+      });
+      return () => { mo.disconnect(); clearTimeout(timer); };
+    }, []);
 
     // ---- Hide the rebuild when the book remounts ---------------------------
 
@@ -4357,7 +4765,8 @@
           return;
         }
 
-        if (dialogOpenRef.current || imageDialogOpenRef.current) return;
+        if (dialogOpenRef.current || imageDialogOpenRef.current
+            || openDialogOpenRef.current || closeDialogOpenRef.current) return;
         if (toolRef.current !== TOOL_MOVE) return;
         if (!e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
         if (e.code === "KeyC") {
@@ -4482,7 +4891,7 @@
         // inner page places it. Nothing else in the book reacts (no flipping,
         // no covers).
         if (pendingImageRef.current) {
-          if (e.target.closest(".toggle-btn")) return; // the tool buttons still work
+          if (e.target.closest(".toggle-btn, .file-btn")) return; // the tool buttons still work
           e.preventDefault();
           e.stopPropagation();
           const pageEl = e.target.closest(".page");
@@ -4493,7 +4902,7 @@
           return;
         }
         if (toolRef.current === TOOL_NONE) return; // let the book flip normally
-        if (e.target.closest(".toggle-btn")) return; // never intercept the tool buttons
+        if (e.target.closest(".toggle-btn, .file-btn")) return; // never intercept the tool buttons
         if (e.target.closest(".fontsize-control")) return; // never intercept the fontsize control
         if (e.target.closest(".fontsize-spin")) return;
         if (e.target.closest(".format-btn")) return;
@@ -4578,7 +4987,7 @@
 
       const handleMouseMove = (e) => {
         if (toolRef.current === TOOL_NONE && !pendingImageRef.current) return;
-        if (e.target.closest(".toggle-btn")) return;
+        if (e.target.closest(".toggle-btn, .file-btn")) return;
         if (e.target.closest(".fontsize-control")) return;
         if (e.target.closest(".font-family-control")) return;
 
@@ -4597,7 +5006,24 @@
         wrap.removeEventListener("mousemove", handleMouseMove, true);
       };
     }, []);
-
+    // Kierunek przewracania myszką: prawa połowa książki to do przodu,
+    // lewa do tyłu (tak samo decyduje biblioteka).
+    useEffect(() => {
+      const wrap = wrapRef.current;
+      const book = flipbookContainerRef.current;
+      if (!wrap || !book) return;
+      const onDown = (e) => {
+        const p = e.touches ? e.touches[0] : e;
+        const r = book.getBoundingClientRect();
+        flipDirRef.current = p.clientX >= r.left + r.width / 2 ? "next" : "prev";
+      };
+      wrap.addEventListener("mousedown", onDown, true);
+      wrap.addEventListener("touchstart", onDown, true);
+      return () => {
+        wrap.removeEventListener("mousedown", onDown, true);
+        wrap.removeEventListener("touchstart", onDown, true);
+      };
+    }, []);
     // size: "fixed" locks the geometry in at mount, so a resize has to remount
     // the book (see the key below). Debounced, otherwise dragging the window
     // edge would rebuild it on every pixel.
@@ -4663,8 +5089,9 @@
     });
 
     // Tooltip note for the buttons that don't work on a cover.
-    const coverNote = isCurrentPageCover() ? " (niedostępne na okładce)" : "";
-
+    const coverNote = coverLock ? " (niedostępne na okładce)" : "";
+    // Dodawanie stron działa na okładce tylko wtedy, gdy książka jest pusta.
+    const addPagesBlocked = coverLock && pageKeys.length > 0;
     return h("div", { className: "app" },
       h("div", {
         className: wrapClass,
@@ -4697,8 +5124,19 @@
             maxShadowOpacity: 0.5,
             onFlip: (e) => setPage(e.data),
             onChangeOrientation: (e) => setOrientation(e.data),
+            onChangeState: (e) => {
+              const moving = e.data === "flipping" || e.data === "user_fold";
+              const dir = flipDirRef.current;
+              // Zamyka się tylko pierwsza rozkładówka do tyłu
+              // albo ostatnia do przodu.
+              setClosing(moving && (
+                (dir === "prev" && page === 1) ||
+                (dir === "next" && page + 1 >= pageKeys.length)
+              ));
+            },
             onInit: () => {
-              unfreezeBook();
+              setClosing(false);    // nowa książka zawsze startuje w spoczynku
+              unfreezeBook();            
               // Strony mają już swoje prawdziwe rozmiary: paski narzędzi na miejsce.
               requestAnimationFrame(() => {
                 document.querySelectorAll(".textbox-wrapper").forEach(placeToolbar);
@@ -4710,64 +5148,76 @@
             ...pageKeys.map((k) => h(Surface, { key: k, ...surfaceProps(k, false) })),
             h(Surface, { key: "c2", ...surfaceProps("c2", true) })
           ),
+			// "Zapisz" / "Otwórz" przy lewym górnym rogu książki (działają też na okładkach).
+			h("div", { className: "file-row" },
+            h("div", {
+              className: "file-btn" + (hasFile && !dirty ? " disabled" : ""),
+              onMouseDown: (e) => e.preventDefault(),   // nie zabiera fokusu z tekstu
+              onClick: requestSave
+            }, "Zapisz"),
+            h("div", {
+              className: "file-btn",
+              onMouseDown: (e) => e.preventDefault(),
+              onClick: requestOpen
+            }, "Otwórz")
+          ),
           h("div", { className: "toggle-row" },
             h("div", {
-              className: "toggle-btn" + (tool === TOOL_TEXT ? " active" : "") + (isCurrentPageCover() ? " disabled" : ""),
+              className: "toggle-btn" + (tool === TOOL_TEXT ? " active" : "") + (coverLock ? " disabled" : ""),
               "data-tip": "Tekst: kliknij stronę, aby dodać pole tekstowe" + coverNote,
               onClick: toggleTextMode
             }, "A"),
             h("div", {
-              className: "toggle-btn" + (tool === TOOL_MOVE ? " active" : "") + (isCurrentPageCover() ? " disabled" : ""),
+              className: "toggle-btn" + (tool === TOOL_MOVE ? " active" : "") + (coverLock ? " disabled" : ""),
               "data-tip": "Przesuwanie i kopiowanie tekstu oraz obrazów" + coverNote,
               onClick: toggleMoveMode
             }, h(MoveIcon)),
-            // Adding pages also works on the covers (front = beginning, back = end).
+            // Na okładce zablokowane (wyjątek: książka bez stron).
             h("div", {
-              className: "toggle-btn",
-              "data-tip": "Dodaj dwie strony",
+              className: "toggle-btn" + (addPagesBlocked ? " disabled" : ""),
+              "data-tip": "Dodaj dwie strony" + (addPagesBlocked ? coverNote : ""),
               onClick: addPages
             }, h(AddPageIcon)),
             // Delete pages: a plain button, never stays selected.
             h("div", {
-              className: "toggle-btn" + (isCurrentPageCover() ? " disabled" : ""),
+              className: "toggle-btn" + (coverLock ? " disabled" : ""),
               "data-tip": "Usuń wyświetlane strony" + coverNote,
               onClick: openDeleteDialog
             }, h(DeletePageIcon)),
-            // Add an image: never stays selected, works on any spread.
+            // Add an image: never stays selected, blocked on the covers.
             h("div", {
-              className: "toggle-btn",
-              "data-tip": "Dodaj obraz",
+              className: "toggle-btn" + (coverLock ? " disabled" : ""),
+              "data-tip": "Dodaj obraz" + coverNote,
               onClick: openImageDialog
             }, h(AddImageIcon)),
                         // Wyrównywanie do punktów: działa razem z innymi narzędziami,
             // ale nie razem z wyrównywaniem do obrazów.
             h("div", {
-              className: "toggle-btn" + (alignOn ? " active" : "") + (captionOn ? " disabled" : ""),
+              className: "toggle-btn" + (alignOn ? " active" : "")
+                + (captionOn || coverLock ? " disabled" : ""),
               "data-tip": "Wyrównywanie do punktów"
-                + (captionOn ? " (niedostępne, gdy włączone jest wyrównywanie tekstu do obrazów)" : ""),
+                + (captionOn ? " (niedostępne, gdy włączone jest wyrównywanie tekstu do obrazów)" : coverNote),
               onMouseDown: (e) => e.preventDefault(),
               onClick: toggleAlign
             }, h(MagnetIcon)),
             // Wyrównywanie tekstu do obrazów: kropki pod obrazami.
             h("div", {
-              className: "toggle-btn" + (captionOn ? " active" : "") + (alignOn ? " disabled" : ""),
+              className: "toggle-btn" + (captionOn ? " active" : "")
+                + (alignOn || coverLock ? " disabled" : ""),
               "data-tip": "Wyrównywanie tekstu do obrazów"
-                + (alignOn ? " (niedostępne, gdy włączone jest wyrównywanie do punktów)" : ""),
+                + (alignOn ? " (niedostępne, gdy włączone jest wyrównywanie do punktów)" : coverNote),
               onMouseDown: (e) => e.preventDefault(),
               onClick: toggleCaption
             }, h(CaptionAlignIcon))
           ),
-          // Podpowiedzi przy prawym dolnym rogu książki. Najniżej (przy rogu)
-          // jest podpowiedź narzędzia tekstu / przesuwania / obrazu, nad nią
-          // podpowiedź włączonego narzędzia wyrównywania.
-          h("div", { className: "hint-stack" },
-            alignOn && !isCurrentPageCover() && h("div", { className: "move-hint" },
+          !hideHints && h("div", { className: "hint-stack" },
+            alignOn && h("div", { className: "move-hint" },
               "Aby wyrównać zawartość na stronie, przeciągnij tekst lub obraz tak, żeby jego środek znalazł się blisko kropki.",
               h("br"),
               h("br"),
               "Układ kropek na stronie wybierzesz na pasku u dołu okna."
             ),
-            captionOn && !isCurrentPageCover() && h("div", { className: "move-hint" },
+            captionOn && h("div", { className: "move-hint" },
               "Przeciągnij tekst tak, aby jego górna część znalazła " +
               "się na kropce pod obrazem. Tekst przyklei się i zostanie wyśrodkowany."
             ),
@@ -4792,9 +5242,15 @@
         h("div", { className: "book-freeze", ref: freezeRef })
       ),
       h("div", { className: "controls" },
-        h("button", { onClick: () => bookRef.current.pageFlip().flipPrev() }, "◀ Poprzednia"),
+        h("button", { onClick: () => {
+          flipDirRef.current = "prev";
+          bookRef.current.pageFlip().flipPrev();
+        } }, "◀ Poprzednia"),
         h("span", { className: "counter" }, pageLabel(page, total, orientation)),
-        h("button", { onClick: () => bookRef.current.pageFlip().flipNext() }, "Następna ▶")
+        h("button", { onClick: () => {
+          flipDirRef.current = "next";
+          bookRef.current.pageFlip().flipNext();
+        } }, "Następna ▶")
       ),
       h("div", {
         className: "dialog-overlay" + (dialogOpen ? " visible" : ""),
@@ -4846,10 +5302,55 @@
           )
         )
       ),
+      // Ostrzeżenie przed otwarciem pliku (tylko gdy jest coś do stracenia).
+      // Zamyka się tylko przez "Anuluj" albo kliknięcie poza nim.
+      h("div", {
+        className: "dialog-overlay" + (openDialogOpen ? " visible" : ""),
+        onMouseDown: (e) => {
+          if (e.target === e.currentTarget) {
+            e.preventDefault();
+            closeOpenDialog();
+          }
+        }
+      },
+        h("div", { className: "dialog", role: "dialog" },
+          h("div", { className: "dialog-title" }, "Otworzyć plik?"),
+          h("div", { className: "dialog-text" },
+            "Otwarty plik zastąpi całą zawartość kroniki, która jest teraz wyświetlana. " +
+            "Tej zawartości nie będzie można później odzyskać."
+          ),
+          h("div", { className: "dialog-actions" },
+            h("button", { onClick: closeOpenDialog }, "Anuluj"),
+            h("button", { className: "danger", onClick: confirmOpen }, "Kontynuuj")
+          )
+        )
+      ),
+      // Ostrzeżenie przy zamykaniu programu (tylko gdy jest coś do stracenia).
+      h("div", {
+        className: "dialog-overlay" + (closeDialogOpen ? " visible" : ""),
+        onMouseDown: (e) => {
+          if (e.target === e.currentTarget) {
+            e.preventDefault();
+            closeCloseDialog();
+          }
+        }
+      },
+        h("div", { className: "dialog", role: "dialog" },
+          h("div", { className: "dialog-title" }, "Zamknąć program?"),
+          h("div", { className: "dialog-text" },
+            "Zawartość kroniki, która jest teraz wyświetlana, zostanie utracona " +
+            "i nie będzie można jej później odzyskać."
+          ),
+          h("div", { className: "dialog-actions" },
+            h("button", { onClick: closeCloseDialog }, "Anuluj"),
+            h("button", { className: "danger", onClick: confirmCloseApp }, "Zamknij")
+          )
+        )
+      ),
       h("div", { className: "toast" + (toastVisible ? " visible" : "") + (toastQuick ? " quick" : "") }, toastText),
 	  // Pasek opcji wyrównania: widoczny tak długo, jak narzędzie jest włączone.
       h("div", {
-        className: "align-bar" + (alignOn ? " visible" : ""),
+        className: "align-bar" + (alignOn && !coverLock ? " visible" : ""),
         // Kliknięcie paska nie zabiera fokusu z edytowanego tekstu.
         onMouseDown: (e) => e.preventDefault()
       },
