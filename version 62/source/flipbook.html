@@ -439,13 +439,24 @@
   .toggle-btn.active.disabled svg {
     stroke: #fff;
   }
-  /* Hint shown while move mode is on, pinned outside the book's right edge,
-     bottom border level with the book's bottom border. */
-  .move-hint {
+  .hint-stack {
     position: absolute;
     left: 100%;
-    bottom: 0;
-    margin-left: 14px;
+    bottom: -4px;
+    margin-left: 10px;
+    padding: 4px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+    user-select: none;
+    z-index: 10;
+    max-height: calc(100% - 42px);   /* nigdy nie sięga rzędu przycisków */
+    overflow: hidden;
+    justify-content: flex-end;
+  }
+  .move-hint {
     width: 190px;
     padding: 8px 10px;
     font-size: 12px;
@@ -457,7 +468,6 @@
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
     user-select: none;
     pointer-events: none;
-    z-index: 10;
   }
   .move-hint kbd {
     display: inline-block;
@@ -1722,6 +1732,7 @@
       flip.on("flip", forward("onFlip"));
       flip.on("changeOrientation", forward("onChangeOrientation"));
       flip.on("init", forward("onInit"));
+	  flip.on("changeState", forward("onChangeState"));
       flip.loadFromHTML(Array.from(el.children).filter((c) => c.classList.contains("page")));
       flipRef.current = flip;
     }, []);
@@ -3292,11 +3303,13 @@
 
     const toggleCaption = () => {
       if (alignOn) return;              // wyrównywanie do punktów jest włączone
+	  if (coverLock) return; // okładka: narzędzie niedostępne
       setCaptionOn(!captionOn);
     };
 
     const toggleAlign = () => {
       if (captionOn) return;            // wyrównywanie do obrazów jest włączone
+      if (coverLock) return; // okładka: narzędzie niedostępne
       if (!alignOn) setAlignLayout(0);  // po każdym włączeniu: pierwsza opcja
       setAlignOn(!alignOn);
     };
@@ -3453,7 +3466,14 @@
 
     // Check if current page is a cover (front or back)
     const isCurrentPageCover = () => page === 0 || page > pageKeys.length;
-
+    // Książka właśnie się zamyka (przewracanie, które skończy się na okładce).
+    const [closing, setClosing] = useState(false);
+    // Kierunek ostatnio rozpoczętego przewracania: "next" albo "prev".
+    const flipDirRef = useRef("next");
+    // Okładka albo zamykanie książki: narzędzia blokują się,
+    // a podpowiedzi chowają od razu.
+    const coverLock = isCurrentPageCover() || closing;
+    const hideHints = coverLock;
     const syncBoxesFromDOM = () => {
       setBoxes((prev) => prev.map((b) => {
         const el = boxRefs.current[b.id];
@@ -3523,18 +3543,18 @@
     };
 
     const toggleTextMode = () => {
-      if (isCurrentPageCover()) return;
+      if (coverLock) return;
       selectTool(TOOL_TEXT);
     };
     const toggleMoveMode = () => {
-      if (isCurrentPageCover()) return;
+      if (coverLock) return;
       selectTool(TOOL_MOVE);
     };
 
     // ---- Delete the currently displayed spread -----------------------------
 
     const openDeleteDialog = () => {
-      if (isCurrentPageCover() || dialogOpenRef.current) return;
+      if (coverLock || dialogOpenRef.current) return;
 
       // Commit whatever is being typed and drop any selection first.
       const current = document.activeElement;
@@ -3597,17 +3617,11 @@
       setPage(next);                 // also feeds startPage via pageRef
       setBookVersion((v) => v + 1);  // remount the book with the new pages
     };
-
-    // ---- Add two pages -------------------------------------------------------
-    // Front cover: the new pages go at the very beginning.
-    // Back cover:  the new pages go at the very end.
-    // Anywhere else: right after the currently displayed spread.
-    // Works even when the book has no inner pages left.
-
+	
     const addPages = () => {
       if (dialogOpenRef.current) return;
-
-      // Commit whatever is being typed and drop any selection first.
+      // Okładka: niedostępne, chyba że książka nie ma już żadnych stron.
+      if (coverLock && pageKeys.length > 0) return;
       const current = document.activeElement;
       if (current && current.isContentEditable) current.blur();
       freezeBook();
@@ -3653,7 +3667,7 @@
 
     const openImageDialog = () => {
       if (dialogOpenRef.current || imageDialogOpenRef.current) return;
-
+      if (coverLock) return;
       // Commit whatever is being typed; no tool stays active.
       const current = document.activeElement;
       if (current && current.isContentEditable) current.blur();
@@ -4584,7 +4598,24 @@
         wrap.removeEventListener("mousemove", handleMouseMove, true);
       };
     }, []);
-
+    // Kierunek przewracania myszką: prawa połowa książki to do przodu,
+    // lewa do tyłu (tak samo decyduje biblioteka).
+    useEffect(() => {
+      const wrap = wrapRef.current;
+      const book = flipbookContainerRef.current;
+      if (!wrap || !book) return;
+      const onDown = (e) => {
+        const p = e.touches ? e.touches[0] : e;
+        const r = book.getBoundingClientRect();
+        flipDirRef.current = p.clientX >= r.left + r.width / 2 ? "next" : "prev";
+      };
+      wrap.addEventListener("mousedown", onDown, true);
+      wrap.addEventListener("touchstart", onDown, true);
+      return () => {
+        wrap.removeEventListener("mousedown", onDown, true);
+        wrap.removeEventListener("touchstart", onDown, true);
+      };
+    }, []);
     // size: "fixed" locks the geometry in at mount, so a resize has to remount
     // the book (see the key below). Debounced, otherwise dragging the window
     // edge would rebuild it on every pixel.
@@ -4650,8 +4681,9 @@
     });
 
     // Tooltip note for the buttons that don't work on a cover.
-    const coverNote = isCurrentPageCover() ? " (niedostępne na okładce)" : "";
-
+    const coverNote = coverLock ? " (niedostępne na okładce)" : "";
+    // Dodawanie stron działa na okładce tylko wtedy, gdy książka jest pusta.
+    const addPagesBlocked = coverLock && pageKeys.length > 0;
     return h("div", { className: "app" },
       h("div", {
         className: wrapClass,
@@ -4684,8 +4716,19 @@
             maxShadowOpacity: 0.5,
             onFlip: (e) => setPage(e.data),
             onChangeOrientation: (e) => setOrientation(e.data),
+            onChangeState: (e) => {
+              const moving = e.data === "flipping" || e.data === "user_fold";
+              const dir = flipDirRef.current;
+              // Zamyka się tylko pierwsza rozkładówka do tyłu
+              // albo ostatnia do przodu.
+              setClosing(moving && (
+                (dir === "prev" && page === 1) ||
+                (dir === "next" && page + 1 >= pageKeys.length)
+              ));
+            },
             onInit: () => {
-              unfreezeBook();
+              setClosing(false);    // nowa książka zawsze startuje w spoczynku
+              unfreezeBook();            
               // Strony mają już swoje prawdziwe rozmiary: paski narzędzi na miejsce.
               requestAnimationFrame(() => {
                 document.querySelectorAll(".textbox-wrapper").forEach(placeToolbar);
@@ -4699,74 +4742,94 @@
           ),
           h("div", { className: "toggle-row" },
             h("div", {
-              className: "toggle-btn" + (tool === TOOL_TEXT ? " active" : "") + (isCurrentPageCover() ? " disabled" : ""),
+              className: "toggle-btn" + (tool === TOOL_TEXT ? " active" : "") + (coverLock ? " disabled" : ""),
               "data-tip": "Tekst: kliknij stronę, aby dodać pole tekstowe" + coverNote,
               onClick: toggleTextMode
             }, "A"),
             h("div", {
-              className: "toggle-btn" + (tool === TOOL_MOVE ? " active" : "") + (isCurrentPageCover() ? " disabled" : ""),
+              className: "toggle-btn" + (tool === TOOL_MOVE ? " active" : "") + (coverLock ? " disabled" : ""),
               "data-tip": "Przesuwanie i kopiowanie tekstu oraz obrazów" + coverNote,
               onClick: toggleMoveMode
             }, h(MoveIcon)),
-            // Adding pages also works on the covers (front = beginning, back = end).
+            // Na okładce zablokowane (wyjątek: książka bez stron).
             h("div", {
-              className: "toggle-btn",
-              "data-tip": "Dodaj dwie strony",
+              className: "toggle-btn" + (addPagesBlocked ? " disabled" : ""),
+              "data-tip": "Dodaj dwie strony" + (addPagesBlocked ? coverNote : ""),
               onClick: addPages
             }, h(AddPageIcon)),
             // Delete pages: a plain button, never stays selected.
             h("div", {
-              className: "toggle-btn" + (isCurrentPageCover() ? " disabled" : ""),
+              className: "toggle-btn" + (coverLock ? " disabled" : ""),
               "data-tip": "Usuń wyświetlane strony" + coverNote,
               onClick: openDeleteDialog
             }, h(DeletePageIcon)),
-            // Add an image: never stays selected, works on any spread.
+            // Add an image: never stays selected, blocked on the covers.
             h("div", {
-              className: "toggle-btn",
-              "data-tip": "Dodaj obraz",
+              className: "toggle-btn" + (coverLock ? " disabled" : ""),
+              "data-tip": "Dodaj obraz" + coverNote,
               onClick: openImageDialog
             }, h(AddImageIcon)),
                         // Wyrównywanie do punktów: działa razem z innymi narzędziami,
             // ale nie razem z wyrównywaniem do obrazów.
             h("div", {
-              className: "toggle-btn" + (alignOn ? " active" : "") + (captionOn ? " disabled" : ""),
+              className: "toggle-btn" + (alignOn ? " active" : "")
+                + (captionOn || coverLock ? " disabled" : ""),
               "data-tip": "Wyrównywanie do punktów"
-                + (captionOn ? " (niedostępne, gdy włączone jest wyrównywanie tekstu do obrazów)" : ""),
+                + (captionOn ? " (niedostępne, gdy włączone jest wyrównywanie tekstu do obrazów)" : coverNote),
               onMouseDown: (e) => e.preventDefault(),
               onClick: toggleAlign
             }, h(MagnetIcon)),
             // Wyrównywanie tekstu do obrazów: kropki pod obrazami.
             h("div", {
-              className: "toggle-btn" + (captionOn ? " active" : "") + (alignOn ? " disabled" : ""),
+              className: "toggle-btn" + (captionOn ? " active" : "")
+                + (alignOn || coverLock ? " disabled" : ""),
               "data-tip": "Wyrównywanie tekstu do obrazów"
-                + (alignOn ? " (niedostępne, gdy włączone jest wyrównywanie do punktów)" : ""),
+                + (alignOn ? " (niedostępne, gdy włączone jest wyrównywanie do punktów)" : coverNote),
               onMouseDown: (e) => e.preventDefault(),
               onClick: toggleCaption
             }, h(CaptionAlignIcon))
           ),
-          tool === TOOL_MOVE && h("div", { className: "move-hint" },
-            "Aby skopiować tekst lub obraz, kliknij go, a następnie użyj",
-            h("br"),
-            h("kbd", null, "Ctrl + C"),
-            " i ",
-            h("kbd", null, "Ctrl + V"),
-			".",
-            h("br"),
-			h("br"),
-            "Aby zmienić rozmiar obrazu, przeciągnij jeden z jego rogów."
-          ),
-          pendingImage && h("div", { className: "move-hint" },
-            pendingImage.loading
-              ? "Wczytywanie obrazu… Możesz już kliknąć miejsce na stronie."
-              : "Kliknij miejsce na stronie, w którym ma się pojawić obraz."
+          !hideHints && h("div", { className: "hint-stack" },
+            alignOn && h("div", { className: "move-hint" },
+              "Aby wyrównać zawartość na stronie, przeciągnij tekst lub obraz tak, żeby jego środek znalazł się blisko kropki.",
+              h("br"),
+              h("br"),
+              "Układ kropek na stronie wybierzesz na pasku u dołu okna."
+            ),
+            captionOn && h("div", { className: "move-hint" },
+              "Przeciągnij tekst tak, aby jego górna część znalazła " +
+              "się na kropce pod obrazem. Tekst przyklei się i zostanie wyśrodkowany."
+            ),
+            tool === TOOL_MOVE && h("div", { className: "move-hint" },
+              "Aby skopiować tekst lub obraz, kliknij go, a następnie użyj",
+              h("br"),
+              h("kbd", null, "Ctrl + C"),
+              " i ",
+              h("kbd", null, "Ctrl + V"),
+              ".",
+              h("br"),
+              h("br"),
+              "Aby zmienić rozmiar obrazu, przeciągnij jeden z jego rogów."
+            ),
+            pendingImage && h("div", { className: "move-hint" },
+              pendingImage.loading
+                ? "Wczytywanie obrazu… Możesz już kliknąć miejsce na stronie."
+                : "Kliknij miejsce na stronie, w którym ma się pojawić obraz."
+            )
           )
         ),
         h("div", { className: "book-freeze", ref: freezeRef })
       ),
       h("div", { className: "controls" },
-        h("button", { onClick: () => bookRef.current.pageFlip().flipPrev() }, "◀ Poprzednia"),
+        h("button", { onClick: () => {
+          flipDirRef.current = "prev";
+          bookRef.current.pageFlip().flipPrev();
+        } }, "◀ Poprzednia"),
         h("span", { className: "counter" }, pageLabel(page, total, orientation)),
-        h("button", { onClick: () => bookRef.current.pageFlip().flipNext() }, "Następna ▶")
+        h("button", { onClick: () => {
+          flipDirRef.current = "next";
+          bookRef.current.pageFlip().flipNext();
+        } }, "Następna ▶")
       ),
       h("div", {
         className: "dialog-overlay" + (dialogOpen ? " visible" : ""),
@@ -4821,7 +4884,7 @@
       h("div", { className: "toast" + (toastVisible ? " visible" : "") + (toastQuick ? " quick" : "") }, toastText),
 	  // Pasek opcji wyrównania: widoczny tak długo, jak narzędzie jest włączone.
       h("div", {
-        className: "align-bar" + (alignOn ? " visible" : ""),
+        className: "align-bar" + (alignOn && !coverLock ? " visible" : ""),
         // Kliknięcie paska nie zabiera fokusu z edytowanego tekstu.
         onMouseDown: (e) => e.preventDefault()
       },
