@@ -1,12 +1,3 @@
-// main.cpp
-//
-// Build WITHOUT an icon:
-//   g++ main.cpp -o app.exe -municode -mwindows -lgdi32 -luser32 -lole32 -lshell32 WebView2Loader.dll.lib -O2
-//
-// Build WITH an icon (app.ico + app.rc next to main.cpp, app.rc contains: 1 ICON "app.ico"):
-//   windres app.rc -O coff -o app_res.o
-//   g++ main.cpp app_res.o -o app.exe -municode -mwindows -lgdi32 -luser32 -lole32 -lshell32 WebView2Loader.dll.lib -O2
-
 #define WINVER 0x0A00
 #define _WIN32_WINNT 0x0A00
 
@@ -16,6 +7,8 @@
 #include <wrl.h>
 #include <wrl/client.h>
 #include <string>
+#include <vector>
+#include <shobjidl.h>
 #include "WebView2.h"
 
 #ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
@@ -28,6 +21,8 @@
 
 // Posted to ourselves when the window gets un-maximized, to maximize it again.
 #define WM_APP_KEEP_MAXIMIZED (WM_APP + 1)
+// Posted to ourselves when the page (flipbook.html) sent a message.
+#define WM_APP_PAGE_MESSAGE (WM_APP + 2)
 
 using Microsoft::WRL::ComPtr;
 
@@ -51,6 +46,10 @@ const UINT_PTR TIMER_FADE_IN = 1;
 const UINT_PTR TIMER_FADE_OUT = 2;
 const int FADE_STEP = 26;
 const int FADE_INTERVAL_MS = 12;
+// Closing: how long to wait for the page to answer before closing anyway
+// (only when the page last said everything is saved).
+const UINT_PTR TIMER_CLOSE_WAIT = 3;
+const int CLOSE_WAIT_MS = 1500;
 
 enum HotButton { BTN_NONE = 0, BTN_MIN, BTN_CLOSE };
 
@@ -59,6 +58,12 @@ HotButton g_pressed = BTN_NONE;
 bool g_tracking = false;
 int g_alpha = 0;
 bool g_firstNavigationDone = false;
+HWND g_hwnd = nullptr;
+std::vector<std::wstring> g_inbox;  // messages from the page, waiting to be handled
+std::wstring g_filePath;            // file the chronicle was saved to / opened from
+std::wstring g_pendingOpenPath;     // file just read, until the page accepts it
+bool g_dirty = false;               // the page says: content is not in a file
+bool g_closeConfirmed = false;      // closing was allowed (nothing to lose, or the user agreed)
 
 ComPtr<ICoreWebView2Controller> g_webviewController;
 ComPtr<ICoreWebView2> g_webview;
@@ -187,6 +192,188 @@ std::wstring GetUserDataDir()
     return dir;
 }
 
+// ---- Saving and opening files ------------------------------------------------
+// The page sends "command\ndata" text messages, the answers look the same.
+
+static void PostToPage(const std::wstring& text)
+{
+    if (g_webview) g_webview->PostWebMessageAsString(text.c_str());
+}
+
+// Own copies of the GUIDs (MinGW has no __uuidof).
+static const CLSID CLSID_FileOpenDialog_ = {0xDC1C5A9C, 0xE88A, 0x4DDE, {0xA5, 0xA1, 0x60, 0xF8, 0x2A, 0x20, 0xAE, 0xF7}};
+static const CLSID CLSID_FileSaveDialog_ = {0xC0B4E2F3, 0xBA21, 0x4773, {0x8D, 0xBA, 0x33, 0x5E, 0xC9, 0x46, 0xEB, 0x8B}};
+static const IID   IID_IFileOpenDialog_  = {0xD57C7288, 0xD4AD, 0x4768, {0xBE, 0x02, 0x9D, 0x96, 0x95, 0x32, 0xD9, 0x60}};
+static const IID   IID_IFileSaveDialog_  = {0x84BCCD23, 0x5FDE, 0x4CDB, {0xAE, 0xA4, 0xAF, 0x64, 0xB8, 0x3D, 0x78, 0xAB}};
+
+const wchar_t FILE_FILTER_NAME[] = L"Kronika szkolna (*.kronika)";
+const wchar_t FILE_FILTER_SPEC[] = L"*.kronika";
+
+static bool ResultPath(IFileDialog* dlg, std::wstring& out)
+{
+    ComPtr<IShellItem> item;
+    if (FAILED(dlg->GetResult(&item))) return false;
+    PWSTR p = nullptr;
+    if (FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &p)) || !p) return false;
+    out = p;
+    CoTaskMemFree(p);
+    return true;
+}
+
+// The normal Windows "Open" window. Exactly one existing .kronika file.
+static bool PickOpenPath(HWND hwnd, std::wstring& out)
+{
+    ComPtr<IFileOpenDialog> dlg;
+    if (FAILED(CoCreateInstance(CLSID_FileOpenDialog_, nullptr, CLSCTX_INPROC_SERVER,
+                                IID_IFileOpenDialog_, reinterpret_cast<void**>(dlg.GetAddressOf()))))
+        return false;
+    COMDLG_FILTERSPEC types[] = { { FILE_FILTER_NAME, FILE_FILTER_SPEC } };
+    dlg->SetFileTypes(1, types);
+    DWORD opts = 0;
+    dlg->GetOptions(&opts);
+    // No FOS_ALLOWMULTISELECT: one file only.
+    dlg->SetOptions(opts | FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST | FOS_FORCEFILESYSTEM);
+    if (FAILED(dlg->Show(hwnd))) return false;   // "Anuluj" too
+    return ResultPath(dlg.Get(), out);
+}
+
+// The normal Windows "Save as" window: folder and file name.
+static bool PickSavePath(HWND hwnd, std::wstring& out)
+{
+    ComPtr<IFileSaveDialog> dlg;
+    if (FAILED(CoCreateInstance(CLSID_FileSaveDialog_, nullptr, CLSCTX_INPROC_SERVER,
+                                IID_IFileSaveDialog_, reinterpret_cast<void**>(dlg.GetAddressOf()))))
+        return false;
+    COMDLG_FILTERSPEC types[] = { { FILE_FILTER_NAME, FILE_FILTER_SPEC } };
+    dlg->SetFileTypes(1, types);
+    dlg->SetDefaultExtension(L"kronika");
+    dlg->SetFileName(L"Kronika szkolna");
+    DWORD opts = 0;
+    dlg->GetOptions(&opts);
+    dlg->SetOptions(opts | FOS_OVERWRITEPROMPT | FOS_PATHMUSTEXIST | FOS_FORCEFILESYSTEM);
+    if (FAILED(dlg->Show(hwnd))) return false;
+    return ResultPath(dlg.Get(), out);
+}
+
+static bool ReadUtf8File(const std::wstring& path, std::wstring& out)
+{
+    HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return false;
+    LARGE_INTEGER size;
+    if (!GetFileSizeEx(f, &size) || size.QuadPart > 512LL * 1024 * 1024)
+    {
+        CloseHandle(f);
+        return false;
+    }
+    std::string data((size_t)size.QuadPart, '\0');
+    DWORD read = 0;
+    bool ok = data.empty() ||
+              (ReadFile(f, &data[0], (DWORD)data.size(), &read, nullptr) && read == data.size());
+    CloseHandle(f);
+    if (!ok) return false;
+
+    size_t start = (data.size() >= 3 && (unsigned char)data[0] == 0xEF &&
+                    (unsigned char)data[1] == 0xBB && (unsigned char)data[2] == 0xBF) ? 3 : 0;
+    int n = MultiByteToWideChar(CP_UTF8, 0, data.data() + start, (int)(data.size() - start), nullptr, 0);
+    out.assign(n > 0 ? n : 0, L'\0');
+    if (n > 0) MultiByteToWideChar(CP_UTF8, 0, data.data() + start, (int)(data.size() - start), &out[0], n);
+    return true;
+}
+
+// Writes to "<name>.tmp" first and only then replaces the real file, so a
+// failed save (full disk, pulled USB stick) never damages the old file.
+static bool WriteUtf8FileSafely(const std::wstring& path, const std::wstring& text)
+{
+    int len = WideCharToMultiByte(CP_UTF8, 0, text.c_str(), (int)text.size(), nullptr, 0, nullptr, nullptr);
+    std::string utf8(len > 0 ? len : 0, '\0');
+    if (len > 0) WideCharToMultiByte(CP_UTF8, 0, text.c_str(), (int)text.size(), &utf8[0], len, nullptr, nullptr);
+
+    std::wstring tmp = path + L".tmp";
+    HANDLE f = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return false;
+    DWORD written = 0;
+    bool ok = utf8.empty() ||
+              (WriteFile(f, utf8.data(), (DWORD)utf8.size(), &written, nullptr) && written == utf8.size());
+    ok = ok && FlushFileBuffers(f);
+    CloseHandle(f);
+    if (ok) ok = MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+    if (!ok) DeleteFileW(tmp.c_str());
+    return ok;
+}
+
+// The fade-out that ends with DestroyWindow (see WM_TIMER).
+static void StartFadeOut(HWND hwnd)
+{
+    KillTimer(hwnd, TIMER_CLOSE_WAIT);
+    LONG_PTR ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
+    SetLayeredWindowAttributes(hwnd, 0, (BYTE)g_alpha, LWA_ALPHA);
+    KillTimer(hwnd, TIMER_FADE_IN);
+    SetTimer(hwnd, TIMER_FADE_OUT, FADE_INTERVAL_MS, nullptr);
+}
+
+// Handles the page's messages. Runs from the message loop, not from inside
+// a WebView2 event, because the file windows are modal.
+static void ProcessPageMessages(HWND hwnd)
+{
+    std::vector<std::wstring> batch;
+    batch.swap(g_inbox);
+    for (const std::wstring& msg : batch)
+    {
+        size_t nl = msg.find(L'\n');
+        std::wstring cmd = msg.substr(0, nl);
+        std::wstring rest = (nl == std::wstring::npos) ? L"" : msg.substr(nl + 1);
+
+        if (cmd == L"dirty")
+        {
+            g_dirty = (rest == L"1");
+        }
+        else if (cmd == L"save")
+        {
+            // Not a file yet: ask where. Already a file: just write the changes.
+            std::wstring path = g_filePath;
+            if (path.empty() && !PickSavePath(hwnd, path)) { PostToPage(L"saveCancelled"); continue; }
+            if (WriteUtf8FileSafely(path, rest))
+            {
+                g_filePath = path;
+                PostToPage(L"saved");
+            }
+            else
+            {
+                PostToPage(L"saveFailed");
+            }
+        }
+        else if (cmd == L"open")
+        {
+            std::wstring path, content;
+            if (!PickOpenPath(hwnd, path)) { PostToPage(L"openCancelled"); continue; }
+            if (!ReadUtf8File(path, content)) { PostToPage(L"openFailed"); continue; }
+            g_pendingOpenPath = path;
+            PostToPage(L"opened\n" + content);
+        }
+        else if (cmd == L"openAccepted")   // the page could read the file
+        {
+            g_filePath = g_pendingOpenPath;
+            g_pendingOpenPath.clear();
+        }
+        else if (cmd == L"openRejected")   // not a chronicle file: keep the old path
+        {
+            g_pendingOpenPath.clear();
+        }
+        else if (cmd == L"closeAsked")     // the page shows its closing window
+        {
+            KillTimer(hwnd, TIMER_CLOSE_WAIT);
+        }
+        else if (cmd == L"close")          // nothing to lose, or the user agreed
+        {
+            g_closeConfirmed = true;
+            ShutdownBlockReasonDestroy(hwnd);
+            StartFadeOut(hwnd);
+        }
+    }
+}
+
 // ---- WebView2 setup (manual COM callbacks — MinGW has no wrl/event.h or __uuidof) ----
 
 void ResizeWebView(HWND hwnd);
@@ -273,6 +460,20 @@ static void OnAcceleratorKeyPressed(ICoreWebView2AcceleratorKeyPressedEventArgs*
     UINT key = 0;
     if (FAILED(args->get_VirtualKey(&key))) return;
 
+    // Ctrl+S: the same as the "Zapisz" button. Holding the keys down
+    // doesn't save again and again.
+    if (key == 'S' && kind == COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN
+        && (GetAsyncKeyState(VK_CONTROL) & 0x8000)
+        && !(GetAsyncKeyState(VK_MENU) & 0x8000)
+        && !(GetAsyncKeyState(VK_SHIFT) & 0x8000))
+    {
+        args->put_Handled(TRUE);
+        COREWEBVIEW2_PHYSICAL_KEY_STATUS status = {};
+        if (SUCCEEDED(args->get_PhysicalKeyStatus(&status)) && !status.WasKeyDown)
+            PostToPage(L"saveShortcut");
+        return;
+    }
+
     if (ShouldBlockKey(key)) args->put_Handled(TRUE);
 }
 
@@ -289,6 +490,29 @@ static void OnNavigationStarting(ICoreWebView2NavigationStartingEventArgs* args)
 static void OnNewWindowRequested(ICoreWebView2NewWindowRequestedEventArgs* args)
 {
     args->put_Handled(TRUE);
+}
+
+// A message from the page. Only stored here; handled from the message loop.
+static void OnWebMessageReceived(ICoreWebView2WebMessageReceivedEventArgs* args)
+{
+    LPWSTR text = nullptr;
+    if (FAILED(args->TryGetWebMessageAsString(&text)) || !text) return;
+    g_inbox.emplace_back(text);
+    CoTaskMemFree(text);
+    PostMessage(g_hwnd, WM_APP_PAGE_MESSAGE, 0, 0);
+}
+
+// The page itself is gone (its process ended): it can't answer
+// "may I close?" any more, and its content is lost anyway, so closing
+// must not wait for it. A crash of a helper process (e.g. graphics)
+// leaves the page and its content intact, so it changes nothing.
+static void OnProcessFailed(ICoreWebView2ProcessFailedEventArgs* args)
+{
+    COREWEBVIEW2_PROCESS_FAILED_KIND kind;
+    if (FAILED(args->get_ProcessFailedKind(&kind))) return;
+    if (kind == COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED ||
+        kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED)
+        g_dirty = false;
 }
 
 class ControllerCompletedHandler : public ICoreWebView2CreateCoreWebView2ControllerCompletedHandler
@@ -357,7 +581,16 @@ public:
                 ICoreWebView2, ICoreWebView2NewWindowRequestedEventArgs>(OnNewWindowRequested);
             g_webview->add_NewWindowRequested(popupHandler, &token);
             popupHandler->Release();
-
+            // Messages from the page (saving, opening, closing).
+            auto* msgHandler = new CallbackHandler<ICoreWebView2WebMessageReceivedEventHandler,
+                ICoreWebView2, ICoreWebView2WebMessageReceivedEventArgs>(OnWebMessageReceived);
+            g_webview->add_WebMessageReceived(msgHandler, &token);
+            msgHandler->Release();
+            // The page crashed (see OnProcessFailed).
+            auto* failHandler = new CallbackHandler<ICoreWebView2ProcessFailedEventHandler,
+                ICoreWebView2, ICoreWebView2ProcessFailedEventArgs>(OnProcessFailed);
+            g_webview->add_ProcessFailed(failHandler, &token);
+            failHandler->Release();
             std::wstring htmlUrl = ToFileUrl(GetExeDir() + L"flipbook.html");
             HRESULT navHr = g_webview->Navigate(htmlUrl.c_str());
             if (FAILED(navHr))
@@ -462,7 +695,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     switch (msg)
     {
     case WM_CREATE:
+        g_hwnd = hwnd;
         InitWebView(hwnd);
+        return 0;
+
+    case WM_APP_PAGE_MESSAGE:
+        ProcessPageMessages(hwnd);
         return 0;
 
     // Zero-size non-client frame: DWM still treats this as a normal
@@ -622,7 +860,15 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         return 0;
 
     case WM_TIMER:
-    {
+    {   
+		if (wParam == TIMER_CLOSE_WAIT)
+        {
+            // The page didn't answer (still loading, or failed to start):
+            // close only if it last said there is nothing to lose.
+            KillTimer(hwnd, TIMER_CLOSE_WAIT);
+            if (!g_dirty) { g_closeConfirmed = true; StartFadeOut(hwnd); }
+            return 0;
+        }
         if (wParam == TIMER_FADE_IN)
         {
             g_alpha += FADE_STEP;
@@ -656,31 +902,30 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         break;
     }
 
+    // Closing (X button, Alt+F4, taskbar): first the page checks whether
+    // the content is in a file. If not, it shows its own window and
+    // answers "close" only when the user agrees.
     case WM_CLOSE:
-    {
-        LONG_PTR ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
-        SetLayeredWindowAttributes(hwnd, 0, (BYTE)g_alpha, LWA_ALPHA);
-
-        KillTimer(hwnd, TIMER_FADE_IN);
-        SetTimer(hwnd, TIMER_FADE_OUT, FADE_INTERVAL_MS, nullptr);
+        if (!g_closeConfirmed && g_webview)
+        {
+            PostToPage(L"confirmClose");
+            SetTimer(hwnd, TIMER_CLOSE_WAIT, CLOSE_WAIT_MS, nullptr);
+            return 0;
+        }
+        StartFadeOut(hwnd);
         return 0;
-    }
-
-    // Windows asks whether the session may end: shutdown, restart, log off,
-    // or an installer (Restart Manager) that needs the app closed. On these
-    // occasions WM_CLOSE is never sent, so the normal closing path above
-    // does not run.
-    //
-    // Nothing needs saving yet, so the answer is always "yes". Once the
-    // chronicle can be saved, this is where saving starts: call
-    // ShutdownBlockReasonCreate(hwnd, L"Zapisywanie kroniki...") so Windows
-    // shows why it has to wait, and answer "yes" when the save is done.
+    // Windows wants to end the session (shutdown, restart, log off). If the
+    // content is not in a file, ask Windows to wait and show the page's
+    // closing window.
     case WM_QUERYENDSESSION:
+        if (g_dirty && !g_closeConfirmed && g_webview)
+        {
+            ShutdownBlockReasonCreate(hwnd, L"Zawarto\u015b\u0107 kroniki nie jest zapisana w pliku.");
+            PostToPage(L"confirmClose");
+            return FALSE;
+        }
         return TRUE;
 
-    // The session really ends (wParam TRUE). Close down right away, without
-    // the fade-out: Windows may end the process soon after this returns.
     case WM_ENDSESSION:
         if (wParam)
         {
@@ -689,8 +934,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             CloseWebView();
             DestroyWindow(hwnd);
         }
+        else
+        {
+            ShutdownBlockReasonDestroy(hwnd);   // shutdown was cancelled
+        }
         return 0;
-
     case WM_DESTROY:
         CloseWebView();
         PostQuitMessage(0);
