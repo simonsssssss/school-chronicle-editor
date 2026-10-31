@@ -976,8 +976,6 @@
     right: calc(100% + 6px);
     transform: translateY(-50%);
   }
-  /* Notki w prawym dolnym rogu nigdy nie sięgają kolumny przycisków
-     (8 przycisków po 32 px + odstępy po 8 px). */
   .hint-stack { max-height: calc(100% - 330px); }
 </style>
 </head>
@@ -1950,7 +1948,7 @@
 <script type="module">
   if (!window.React || !window.ReactDOM || !window.St) {
     const root = document.getElementById("root");
-    root.innerHTML = '<div class="startup-error">Brakuje plików w folderze <b>lib</b> ' +
+    root.innerHTML = '<div class="startup-error">Brakuje plików w&nbsp;folderze <b>lib</b> ' +
       '(react, react-dom, page-flip). Aplikacja nie może się uruchomić.</div>';
     throw new Error("Missing library files in the lib folder");
   }
@@ -1994,7 +1992,9 @@
   const MARGIN_Y = 32;         // breathing room top+bottom
   const CONTROLS_H = 60;       // buttons row + its margin
   const ALIGN_BAR_H = 68;      // miejsce na pasek wyrównywania (to samo co padding-bottom w #root)
-
+  // Miejsce po każdej stronie książki: po prawej kolumna przycisków
+  // i notki (10 px odstępu + 190 px notki + zapas), po lewej lista wzorów.
+  const SIDE_ROOM = 210;
   // Text sizes are measured in "page units" instead of screen pixels, so a
   // page looks the same on every screen. One unit = page width / REF_PAGE_W.
   // A bigger REF_PAGE_W makes all text smaller, a smaller one makes it bigger.
@@ -2334,7 +2334,9 @@
       copy.querySelectorAll("[id]").forEach((el) => el.removeAttribute("id"));
       list.push({
         key: "w" + m[1],
-        name: m[2].trim(),                      // nazwa bez numeru
+        // Nazwa bez numeru. Twarda spacja po jednoliterowych słowach
+        // ("z", "w"...), żeby nie zostawały same na końcu linii.
+        name: m[2].trim().replace(/(^|\s)(\S) /g, "$1$2\u00A0"),
         viewBox: vb.join(" "),
         ratio: vb[3] / vb[2],                   // wysokość / szerokość
         width: parseFloat(svg.getAttribute("width")) || vb[2],
@@ -2347,9 +2349,7 @@
   })();
   const PATTERN_MAP = new Map(PATTERNS.map((p) => [p.key, p]));
 
-  // Nowy wzór: rozmiar z podglądu wzorów razy PATTERN_SCALE (w jednostkach
-  // strony), ale najwyżej MAX_PATTERN_PART szerokości / wysokości strony.
-  const PATTERN_SCALE = 0.5;
+  const PATTERN_SCALE = 0.3;
   const MAX_PATTERN_PART = 0.5;
   const ORNAMENT_HANDLE = 11;      // strzałki rozmiaru (jak przy obrazach)
   const MIN_ORNAMENT_SIDE = 16;    // najkrótszy bok wzoru przy zmniejszaniu
@@ -3120,7 +3120,7 @@
   // Largest page that fits: two pages side by side horizontally, one page tall
   // vertically (minus the controls). Whichever axis runs out first wins.
   function computePageSize() {
-    const availW = Math.max(window.innerWidth - MARGIN_X, MIN_PAGE_W * 2);
+    const availW = Math.max(window.innerWidth - Math.max(MARGIN_X, 2 * SIDE_ROOM), MIN_PAGE_W * 2);
     const availH = Math.max(window.innerHeight - MARGIN_Y - CONTROLS_H - ALIGN_BAR_H, MIN_PAGE_W * PAGE_RATIO);
 
     let w = Math.floor(availW / 2);
@@ -4826,7 +4826,8 @@
     const [selectedId, setSelectedId] = useState(null);
     const selectedImageIdRef = useRef(null);
     const [selectedImageId, setSelectedImageId] = useState(null);
-    // Move mode: zaznaczony wzór (tylko do obramowania).
+    // Move mode: zaznaczony wzór. Ref dla skrótów klawiszowych, stan do obramowania.
+    const selectedOrnamentIdRef = useRef(null);
     const [selectedOrnamentId, setSelectedOrnamentId] = useState(null);
     // Select a text box (or nothing, with null). Always clears a selected picture / pattern.
     const selectBox = (id) => {
@@ -4834,6 +4835,7 @@
       setSelectedId(id);
       selectedImageIdRef.current = null;
       setSelectedImageId(null);
+      selectedOrnamentIdRef.current = null;
       setSelectedOrnamentId(null);
     };
     // Select a picture. Always clears a selected text box / pattern.
@@ -4842,6 +4844,7 @@
       setSelectedId(null);
       selectedImageIdRef.current = id;
       setSelectedImageId(id);
+      selectedOrnamentIdRef.current = null;
       setSelectedOrnamentId(null);
     };
     // Zaznacz wzór. Zawsze odznacza pole tekstowe i obraz.
@@ -4850,9 +4853,9 @@
       setSelectedId(null);
       selectedImageIdRef.current = null;
       setSelectedImageId(null);
+      selectedOrnamentIdRef.current = id;
       setSelectedOrnamentId(id);
     };
-
     // Internal clipboard: only filled by Ctrl+C in move mode, so text copied
     // anywhere else can never be pasted as a box.
     const clipboardRef = useRef(null);
@@ -5468,7 +5471,7 @@
       const snap = docSnapshot(doc);
       if (hasFileRef.current && snap === baselineRef.current) return;   // nic do zapisania
       if (!hostPost("save\n" + JSON.stringify(doc))) {
-        showToast("Zapisywanie działa tylko w programie Kronika szkolna");
+        showToast("Zapisywanie działa tylko w\u00A0programie Kronika szkolna");
         return;
       }
       fileBusyRef.current = true;
@@ -5477,7 +5480,7 @@
 
     const startOpen = () => {
       if (hostPost("open")) fileBusyRef.current = true;
-      else showToast("Otwieranie działa tylko w programie Kronika szkolna");
+      else showToast("Otwieranie działa tylko w\u00A0programie Kronika szkolna");
     };
 
     // "Otwórz": okno z ostrzeżeniem tylko wtedy, gdy coś można stracić.
@@ -5936,7 +5939,7 @@
     const placePattern = (pageEl, clientX, clientY) => {
       const key = selectedPatternRef.current;
       if (!key) {
-        showToast("Najpierw wybierz wzór z listy po lewej stronie");
+        showToast("Najpierw wybierz wzór z\u00A0listy po lewej stronie");
         return;
       }
       const pat = PATTERN_MAP.get(key);
@@ -6220,6 +6223,21 @@
     // Ctrl+C in move mode: remember the selected picture, or the selected
     // box's content and size.
     const copySelectedBox = () => {
+      // Zaznaczony wzór: zapamiętaj jego rodzaj, szerokość, obrót i odbicie.
+      const ornId = selectedOrnamentIdRef.current;
+      if (ornId !== null) {
+        const o = ornamentsRef.current.find((x) => x.id === ornId);
+        if (!o) return;
+        clipboardRef.current = {
+          kind: "ornament",
+          sourceId: ornId,
+          pattern: o.pattern,
+          w: o.w,
+          rot: o.rot || 0,
+          flip: !!o.flip
+        };
+        return;
+      }
       // A picture is selected: copy the picture.
       const imageId = selectedImageIdRef.current;
       if (imageId !== null) {
@@ -6315,7 +6333,47 @@
       }]);
       selectImage(id); // repeated Ctrl+V continues from the fresh copy
     };
+	
+    // Ctrl+V z skopiowanym wzorem: kopia ze środkiem pod kursorem (albo obok
+    // oryginału, gdy kursor nie jest nad stroną), zawsze cała na stronie.
+    const pasteOrnament = (clip) => {
+      const pat = PATTERN_MAP.get(clip.pattern);
+      if (!pat) return;
 
+      let pageEl = pageUnderPointer(), x = 0, y = 0;
+      if (pageEl) {
+        x = lastPointerRef.current.x;
+        y = lastPointerRef.current.y;
+      } else {
+        const container = flipbookContainerRef.current;
+        const src = container && container.querySelector(`.page-ornament[data-ornament-id="${clip.sourceId}"]`);
+        const pg = src && src.parentElement;
+        if (!pg) return;
+        const r = src.getBoundingClientRect();
+        pageEl = pg;
+        x = r.left + r.width / 2 + 16;
+        y = r.top + r.height / 2 + 16;
+      }
+
+      const pageW = pageEl.offsetWidth, pageH = pageEl.offsetHeight;
+      if (!pageW || !pageH) return;
+      const innerW = pageEl.clientWidth, innerH = pageEl.clientHeight;
+      const rect = pageEl.getBoundingClientRect();
+      const g = ornamentGeom({ x: 0, y: 0, w: clip.w, rot: clip.rot }, pageW, pageH, pat);
+
+      let cx = clampCenter((x - rect.left) / rect.width * pageW, g.ex, innerW);
+      let cy = clampCenter((y - rect.top) / rect.height * pageH, g.ey, innerH);
+      // Wyrównywanie do punktów: obok kropki środek wzoru ląduje na niej.
+      const snap = snapNear(pageEl, (cx - g.ex) / pageW, (cy - g.ey) / pageH, 2 * g.ex / pageW, 2 * g.ey / pageH);
+      if (snap) { cx = snap.left * pageW + g.ex; cy = snap.top * pageH + g.ey; }
+
+      const id = ++ornamentIdRef.current;
+      setOrnaments((prev) => [...prev, {
+        id, page: pageEl.dataset.pageKey, pattern: clip.pattern,
+        x: cx / pageW, y: cy / pageH, w: clip.w, rot: clip.rot, flip: clip.flip
+      }]);
+      selectOrnament(id);   // kolejne Ctrl+V kopiuje już nową kopię
+    };
     // Ctrl+V in move mode: drop a copy under the cursor (or next to the
     // original if the cursor isn't over a writable page), kept inside the page.
     const pasteBox = () => {
@@ -6323,6 +6381,11 @@
       if (!clip) return;
       if (clip.kind === "image") {
         pasteImage(clip);
+        return;
+      }
+	  
+	  if (clip.kind === "ornament") {
+        pasteOrnament(clip);
         return;
       }
 
@@ -6812,36 +6875,36 @@
           h("div", { className: "toggle-row" },
             h("div", {
               className: "toggle-btn" + (tool === TOOL_TEXT ? " active" : "") + (coverLock ? " disabled" : ""),
-              "data-tip": "Tekst: kliknij stronę, aby dodać pole tekstowe" + coverNote,
+              "data-tip": "Dodawanie tekstu" + coverNote,
               onClick: toggleTextMode
             }, "A"),
             h("div", {
               className: "toggle-btn" + (tool === TOOL_MOVE ? " active" : "") + (coverLock ? " disabled" : ""),
-              "data-tip": "Przesuwanie i kopiowanie tekstu oraz obrazów" + coverNote,
+              "data-tip": "Przesuwanie i\u00A0kopiowanie treści" + coverNote,
               onClick: toggleMoveMode
             }, h(MoveIcon)),
             // Na okładce zablokowane (wyjątek: książka bez stron).
             h("div", {
               className: "toggle-btn" + (addPagesBlocked ? " disabled" : ""),
-              "data-tip": "Dodaj dwie strony" + (addPagesBlocked ? coverNote : ""),
+              "data-tip": "Dodawanie stron" + (addPagesBlocked ? coverNote : ""),
               onClick: addPages
             }, h(AddPageIcon)),
             // Delete pages: a plain button, never stays selected.
             h("div", {
               className: "toggle-btn" + (coverLock ? " disabled" : ""),
-              "data-tip": "Usuń wyświetlane strony" + coverNote,
+              "data-tip": "Usuwanie wyświetlanych stron" + coverNote,
               onClick: openDeleteDialog
             }, h(DeletePageIcon)),
             // Add an image: never stays selected, blocked on the covers.
             h("div", {
               className: "toggle-btn" + (coverLock ? " disabled" : ""),
-              "data-tip": "Dodaj obraz" + coverNote,
+              "data-tip": "Dodawanie obrazów" + coverNote,
               onClick: openImageDialog
             }, h(AddImageIcon)),
             // Wzory: przycisk wciśnięty tak długo, jak narzędzie jest włączone.
             h("div", {
               className: "toggle-btn" + (tool === TOOL_PATTERN ? " active" : "") + (coverLock ? " disabled" : ""),
-              "data-tip": "Wzory: wybierz wzór z listy po lewej i klikaj strony, aby go dodać" + coverNote,
+              "data-tip": "Dodawanie wzorów" + coverNote,
               onClick: togglePatternMode
             }, h(PatternIcon)),
             // Wyrównywanie do punktów: działa razem z innymi narzędziami,
@@ -6868,30 +6931,30 @@
           tool === TOOL_PATTERN && h(PatternPanel, { selected: selectedPattern, onSelect: selectPattern }),
           !hideHints && h("div", { className: "hint-stack" },
             alignOn && h("div", { className: "move-hint" },
-              "Aby wyrównać zawartość na stronie, przeciągnij tekst lub obraz tak, żeby jego środek znalazł się blisko kropki.",
+              "Aby wyrównać treść na stronie, przeciągnij ją tak, żeby jej środek znalazł się blisko kropki.",
               h("br"),
               h("br"),
-              "Układ kropek na stronie wybierzesz na pasku u dołu okna."
+              "Układ kropek na stronie wybierzesz na pasku u\u00A0dołu okna."
             ),
             captionOn && h("div", { className: "move-hint" },
               "Przeciągnij tekst tak, aby jego górna część znalazła " +
-              "się na kropce pod obrazem. Tekst przyklei się i zostanie wyśrodkowany."
+              "się na kropce pod obrazem. Tekst przyklei się i\u00A0zostanie wyśrodkowany."
             ),
             tool === TOOL_MOVE && h("div", { className: "move-hint" },
-              "Aby skopiować tekst lub obraz, kliknij go, a następnie użyj",
+              "Aby skopiować tekst, obraz lub wzór, kliknij go, a\u00A0następnie użyj",
               h("br"),
               h("kbd", null, "Ctrl + C"),
-              " i ",
+              " i\u00A0",
               h("kbd", null, "Ctrl + V"),
               ".",
               h("br"),
               h("br"),
-              "Aby zmienić rozmiar obrazu, przeciągnij jeden z jego rogów."
+              "Aby zmienić rozmiar obrazu lub wzoru, przeciągnij jeden z\u00A0jego rogów."
             ),
             pendingImage && h("div", { className: "move-hint" },
               pendingImage.loading
                 ? "Wczytywanie obrazu… Możesz już kliknąć miejsce na stronie."
-                : "Kliknij miejsce na stronie, w którym ma się pojawić obraz."
+                : "Kliknij miejsce na stronie, w\u00A0którym ma się pojawić obraz."
             )
           )
         ),
@@ -6938,7 +7001,7 @@
         h("div", { className: "dialog", role: "dialog" },
           h("div", { className: "dialog-title" }, "Usunąć strony?"),
           h("div", { className: "dialog-text" },
-            `Dwie aktualnie wyświetlane strony (${dialogPages}) zostaną usunięte razem z ich zawartością.`
+            `Dwie aktualnie wyświetlane strony (${dialogPages}) zostaną usunięte razem z\u00A0ich zawartością.`
           ),
           h("div", { className: "dialog-actions" },
             h("button", { onClick: closeDeleteDialog }, "Anuluj"),
@@ -6960,7 +7023,7 @@
           h("div", { className: "dialog-title" }, "Dodaj obraz"),
           h("div", { className: "dialog-text" },
             "Wybierz jeden plik graficzny (JPG, PNG, GIF, BMP, WEBP, SVG, ICO, AVIF). " +
-            "Potem kliknij miejsce na stronie, w którym ma się pojawić."
+            "Potem kliknij miejsce na stronie, w\u00A0którym ma się pojawić."
           ),
           h("input", {
             type: "file",
@@ -6989,8 +7052,8 @@
         h("div", { className: "dialog", role: "dialog" },
           h("div", { className: "dialog-title" }, "Otworzyć plik?"),
           h("div", { className: "dialog-text" },
-            "Otwarty plik zastąpi całą zawartość kroniki, która jest teraz wyświetlana. " +
-            "Tej zawartości nie będzie można później odzyskać."
+            "Zawartość kroniki, która jest teraz używana, zostanie utracona " +
+            "i\u00A0nie będzie można jej później odzyskać."
           ),
           h("div", { className: "dialog-actions" },
             h("button", { onClick: closeOpenDialog }, "Anuluj"),
@@ -7011,8 +7074,8 @@
         h("div", { className: "dialog", role: "dialog" },
           h("div", { className: "dialog-title" }, "Zamknąć program?"),
           h("div", { className: "dialog-text" },
-            "Zawartość kroniki, która jest teraz wyświetlana, zostanie utracona " +
-            "i nie będzie można jej później odzyskać."
+            "Zawartość kroniki, która jest teraz używana, zostanie utracona " +
+            "i\u00A0nie będzie można jej później odzyskać."
           ),
           h("div", { className: "dialog-actions" },
             h("button", { onClick: closeCloseDialog }, "Anuluj"),
