@@ -480,10 +480,21 @@
     background: #f7f7f7;
     white-space: nowrap;
   }
+  /* Wiersz pod książką: trzy kolumny. Boczne dzielą wolne miejsce po równo,
+     więc przyciski przewracania stoją na środku. Gdy miejsca brakuje, prawa
+     kolumna ("Zapisz" / "Otwórz") nie da się ścisnąć, więc przyciski
+     przewracania przesuwają się w lewo i nigdy na nią nie zachodzą. */
   .controls {
     margin-top: 16px;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    column-gap: 12px;
+  }
+  /* Przyciski przewracania stron i licznik (środkowa kolumna). */
+  .nav-group {
+    grid-column: 2;
     display: flex;
-    justify-content: center;
     align-items: center;
     gap: 12px;
   }
@@ -495,6 +506,14 @@
     color: #444;
   }
   button { border: 1px solid #ccc; background: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; }
+  /* Przyciski przewracania stron: ta sama wysokość i czcionka co "Zapisz" / "Otwórz". */
+  .controls button {
+    height: 32px;
+    box-sizing: border-box;
+    padding: 0 14px;
+    font-family: inherit;
+    font-size: 13px;
+  }
   button:hover { background: #eee; }
 
   .flipbook-container {
@@ -765,16 +784,13 @@
     visibility: hidden;
     transition: none;
   }
-  /* "Zapisz" / "Otwórz": przy lewym górnym rogu książki, na zewnątrz,
-     górną krawędzią równo z górną krawędzią książki. */
+  /* "Zapisz" / "Otwórz": prawa kolumna wiersza pod książką, przy prawej
+     krawędzi książki, na tej samej wysokości co przyciski przewracania. */
   .file-row {
-    position: absolute;
-    top: 0;
-    right: 100%;
-    margin-right: 14px;
+    grid-column: 3;
+    justify-self: end;
     display: flex;
     gap: 8px;
-    z-index: 10;
   }
   .file-btn {
     height: 32px;
@@ -803,10 +819,1129 @@
     color: #bbb;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.075);
   }
+  /* ---- Narzędzie "Wzory" ------------------------------------------------ */
+  :root {
+    /* Kursor obrotu (okrągła strzałka). */
+    --rotate-cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 12a8 8 0 1 1-2.34-5.66L20 8M20 3v5h-5' stroke='white' stroke-width='5'/%3E%3Cpath d='M20 12a8 8 0 1 1-2.34-5.66L20 8M20 3v5h-5' stroke='%23000000' stroke-width='2'/%3E%3C/g%3E%3C/svg%3E") 12 12, pointer;
+  }
+  /* Ukryte miejsce, w którym wzory są rysowane przy starcie. */
+  #pattern-source {
+    position: fixed;
+    left: -10000px;
+    top: 0;
+    width: 800px;
+    pointer-events: none;
+  }
+  /* Wygląd samych wzorów (te same zasady co w wzory-roslinne.html). */
+  .pattern-svg {
+    display: block;
+    overflow: visible;
+    color: #333;
+  }
+  .pattern-svg .s,
+  #pattern-source .s {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .rib { fill: none; stroke: rgba(255, 255, 255, 0.5); stroke-width: 0.8; }
+
+  /* Lista wzorów na lewo od książki. */
+  .pattern-panel {
+    position: absolute;
+    top: 0;
+    right: 100%;
+    margin-right: 14px;
+    width: min(300px, calc((100vw - 100%) / 2 - 28px));
+    height: 100%;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    user-select: none;
+    z-index: 10;
+  }
+  .pattern-panel-title {
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #333;
+    border-bottom: 1px solid #e6e6e6;
+  }
+  .pattern-grid {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 8px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    align-content: start;
+  }
+  .pattern-grid::-webkit-scrollbar { width: 8px; }
+  .pattern-grid::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
+  .pattern-grid::-webkit-scrollbar-thumb:hover { background: #aaa; }
+  .pattern-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 6px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    background: #fff;
+    cursor: pointer;
+  }
+  .pattern-card:hover { background: #f2f2f2; }
+  .pattern-card.selected {
+    border-color: #0078d7;
+    box-shadow: 0 0 0 1px #0078d7;
+    background: #eaf3fc;
+  }
+  .pattern-thumb {
+    width: 100%;
+    height: 64px;
+    box-sizing: border-box;
+    padding: 6px;
+    background: #fafafa;   /* ten sam kolor co strona: "dziurki" we wzorach */
+    border: 1px solid #e6e6e6;
+    border-radius: 4px;
+  }
+  .pattern-thumb .pattern-svg { width: 100%; height: 100%; }
+  .pattern-name {
+    font-size: 11px;
+    line-height: 1.3;
+    color: #444;
+    text-align: center;
+  }
+  .pattern-empty { padding: 12px; font-size: 12px; color: #888; }
+
+  /* Wzór na stronie. Łapie kliknięcia tylko w trybie przesuwania. */
+  .page-ornament {
+    position: absolute;
+    z-index: 0;
+    pointer-events: none;
+    user-select: none;
+    transform-origin: 50% 50%;
+  }
+  .page-ornament .pattern-svg { width: 100%; height: 100%; }
+  .book-wrap.move-mode .page-ornament {
+    pointer-events: auto;
+    cursor: move;
+    outline: 1px dashed #999;
+  }
+  .book-wrap.move-mode .page-ornament.selected { outline: 2px solid #0078d7; }
+  /* Przyciski przy wzorze (tryb przesuwania): obrót pod wzorem,
+     lustrzane odbicie przy prawym górnym rogu. */
+  .ornament-mirror,
+  .ornament-rotate-btn {
+    position: absolute;
+    display: none;
+    width: 28px;
+    height: 20px;
+    box-sizing: border-box;
+    align-items: center;
+    justify-content: center;
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    color: #444;
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    z-index: 0;
+  }
+  .ornament-rotate-btn { cursor: var(--rotate-cursor); }
+  .book-wrap.move-mode .ornament-mirror,
+  .book-wrap.move-mode .ornament-rotate-btn { display: flex; }
+  .ornament-mirror:hover,
+  .ornament-rotate-btn:hover { background: #eee; }
+  /* Podczas obracania / zmiany rozmiaru wzoru cała aplikacja ma ten sam kursor. */
+  html.ornament-cursor, html.ornament-cursor * { cursor: var(--orn-cursor) !important; }
+  /* Wybrany wzór czeka na kliknięcie: strony "kopiuj", okładki "nie wolno". */
+  .book-wrap.pattern-ready .page,
+  .book-wrap.pattern-ready .textbox { cursor: copy; }
+  .book-wrap.pattern-ready .page-cover { cursor: not-allowed; }
+
+  /* Przyciski narzędzi w jednej kolumnie przy prawej krawędzi książki
+     (zawsze mieszczą się obok niej, niezależnie od szerokości ekranu). */
+  .toggle-row { flex-direction: column; }
+  /* Dymek przycisku: na lewo od przycisku, żeby nie zasłaniał tych niżej. */
+  .toggle-btn[data-tip]::after {
+    top: 50%;
+    right: calc(100% + 6px);
+    transform: translateY(-50%);
+  }
+  /* Notki w prawym dolnym rogu nigdy nie sięgają kolumny przycisków
+     (8 przycisków po 32 px + odstępy po 8 px). */
+  .hint-stack { max-height: calc(100% - 330px); }
 </style>
 </head>
 <body>
 <div id="root"></div>
+<!-- Źródło wzorów (narzędzie "Wzory"). Niewidoczne: wzory są tu tylko
+     rysowane przy starcie, a aplikacja kopiuje je do listy i na strony. -->
+<div id="pattern-source" aria-hidden="true">
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <g id="leaf"><path fill="currentColor" d="M0 0C6-7 16-7 22 0C16 7 6 7 0 0Z"/><path class="rib" d="M2 0H19"/></g>
+    <g id="petal"><path fill="currentColor" d="M0 0C4-6 12-7 16-4C18-2 18 2 16 4C12 7 4 6 0 0Z"/></g>
+    <g id="lpetal"><path fill="currentColor" stroke="rgba(255,255,255,.55)" stroke-width=".7" d="M0 0C4-6 12-7 16-4C18-2 18 2 16 4C12 7 4 6 0 0Z"/></g>
+    <g id="ray"><path fill="currentColor" d="M0 0C3-2.5 13-3 16 0C13 3 3 2.5 0 0Z"/></g>
+    <g id="small"><path fill="currentColor" d="M0 0C3-3 9-3 12 0C9 3 3 3 0 0Z"/></g>
+    <g id="narrow"><path fill="currentColor" d="M0 0C6-3.5 16-3.5 24 0C16 3.5 6 3.5 0 0Z"/><path class="rib" d="M2 0H21"/></g>
+    <g id="blade"><path fill="currentColor" stroke="rgba(255,255,255,.55)" stroke-width=".6" d="M0 0C4-3 14-4 22-2C25-1 25 1 22 2C14 4 4 3 0 0Z"/></g>
+    <g id="point"><path fill="currentColor" stroke="rgba(255,255,255,.55)" stroke-width=".6" d="M0 0C4-5 12-6 18 0C12 6 4 5 0 0Z"/></g>
+    <g id="heartleaf"><path fill="currentColor" d="M0 0C-2-6 4-11 10-10C16-9 21-4 24 0C21 4 16 9 10 10C4 11-2 6 0 0Z"/><path class="rib" d="M1 0H21"/></g>
+    <g id="serrate"><path fill="currentColor" d="M0 0C3-5 7-7 10-7L12-9L13-7L16-8L16-6L19-6L18-4L21-3L20-1L23 0L20 1L21 3L18 4L19 6L16 6L16 8L13 7L12 9L10 7C7 7 3 5 0 0Z"/><path class="rib" d="M1 0H20M7 0L11-4M7 0L11 4M13 0L16-3M13 0L16 3"/></g>
+    <g id="ivy"><path fill="currentColor" d="M0 0C1-5 5-10 10-10C12-7 12-5 13-4C17-5 21-3 22 0C21 3 17 5 13 4C12 5 12 7 10 10C5 10 1 5 0 0Z"/><path class="rib" d="M1 0H20M8 0L11-6M8 0L11 6"/></g>
+    <g id="frond"><path fill="currentColor" d="M0 0C5-3 15-3 20 0C15 3 5 3 0 0Z"/></g>
+    <g id="holly"><path fill="currentColor" d="M0 0L3-4L6-3L8-7L11-5L14-8L16-4L20-5L24 0L20 5L16 4L14 8L11 5L8 7L6 3L3 4Z"/><path class="rib" d="M1 0H22"/></g>
+    <g id="catkin"><path fill="currentColor" d="M0 0C2-5 10-6 14-4C17-2 17 2 14 4C10 6 2 5 0 0Z"/><ellipse fill="#fafafa" opacity=".35" cx="10" cy="-1.5" rx="4" ry="2"/></g>
+    <g id="trumpet"><path fill="currentColor" d="M0 0L10-2C12-7 18-9 20-9C22-4 22 4 20 9C18 9 12 7 10 2Z"/><ellipse fill="#fafafa" opacity=".4" cx="19.5" cy="0" rx="1.6" ry="7"/></g>
+    <g id="poppy"><path fill="currentColor" stroke="rgba(255,255,255,.55)" stroke-width=".7" d="M0 0C2-12 14-16 20-10C24-6 24 6 20 10C14 16 2 12 0 0Z"/></g>
+    <g id="cone"><path fill="currentColor" stroke="rgba(255,255,255,.6)" stroke-width=".8" d="M-6 0C-6 6-3 9 0 9C3 9 6 6 6 0Z"/></g>
+    <g id="needle"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" d="M0 0H10"/></g>
+    <g id="pineNeedle"><path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" vector-effect="non-scaling-stroke" d="M0 0H10"/></g>
+  </defs>
+</svg>
+
+<div class="grid">
+  <!-- z pliku podglad-wzorow.html -->
+  <div class="card"><h2>1. Narożnik z winoroślą</h2><div class="preview">
+    <svg id="cornerArt" viewBox="0 0 130 130" width="130" height="130">
+      <path id="cornerStem" class="s" d="M122 10C80 6 50 8 30 16C16 22 12 34 12 50C10 78 12 100 10 122"/>
+      <path class="s" style="stroke-width:1.4" d="M30 16C22 28 28 42 40 38C50 34 46 22 38 24C33 26 34 31 38 31"/>
+      <circle fill="currentColor" cx="122" cy="10" r="3"/>
+      <circle fill="currentColor" cx="10" cy="122" r="3"/>
+    </svg></div></div>
+
+  <div class="card"><h2>2. Pnącze bluszczu</h2><div class="preview">
+    <svg viewBox="0 0 400 70" width="260">
+      <path id="ivyStem" class="s" d="M0 35Q25 15 50 35T100 35T150 35T200 35T250 35T300 35T350 35T400 35"/>
+    </svg></div></div>
+
+  <div class="card"><h2>3. Separator z listkami</h2><div class="preview">
+    <svg id="sepArt" viewBox="0 0 300 40" width="260">
+      <path class="s" style="stroke-width:1.2" d="M20 22H122M178 22H280"/>
+      <circle fill="currentColor" cx="16" cy="22" r="2.5"/>
+      <circle fill="currentColor" cx="284" cy="22" r="2.5"/>
+    </svg></div></div>
+
+  <div class="card"><h2>4. Rozeta</h2><div class="preview">
+    <svg id="rosetteArt" viewBox="-50 -50 100 100" width="130"></svg></div></div>
+
+  <div class="card"><h2>5. Gałązka świerku</h2><div class="preview">
+    <svg viewBox="0 0 220 110" width="230">
+      <path id="spruceMain" class="s" style="stroke-width:2.5" d="M10 60C70 52 140 40 210 36"/>
+      <path id="spruceA" class="s" style="stroke-width:1.6" d="M70 54C82 36 96 26 118 18"/>
+      <path id="spruceB" class="s" style="stroke-width:1.6" d="M140 42C150 58 166 68 188 72"/>
+      <path class="s" style="stroke-width:1" d="M120 47V72"/>
+      <rect fill="currentColor" x="116" y="71" width="8" height="4"/>
+      <circle fill="currentColor" cx="120" cy="83" r="8"/>
+      <circle fill="#fff" opacity=".5" cx="117" cy="80" r="2"/>
+    </svg></div></div>
+
+  <div class="card"><h2>6. Tulipan</h2><div class="preview">
+    <svg viewBox="0 0 120 150" width="110">
+      <path class="s" style="stroke-width:2.5" d="M60 142C58 112 62 85 60 58"/>
+      <path fill="currentColor" d="M60 135C35 120 30 95 38 75C45 95 52 110 60 125Z"/>
+      <path fill="currentColor" d="M60 120C85 105 92 85 86 65C78 85 70 100 60 112Z"/>
+      <g transform="translate(60 55)">
+        <path fill="currentColor" d="M-13-4C-16-24-8-36-5-36L0-26L5-36C8-36 16-24 13-4C9 6-9 6-13-4Z"/>
+        <path class="rib" d="M0-26V2M-6-20C-7-12-6-6-4 0M6-20C7-12 6-6 4 0"/>
+      </g>
+    </svg></div></div>
+
+  <!-- z pliku podglad-wzorow-2.html -->
+  <div class="card"><h2>7. Wianek z kwiatów</h2><div class="preview">
+    <svg id="wreathArt" viewBox="-80 -80 160 160" width="160">
+      <path id="wreathPath" class="s" d="M0-60A60 60 0 1 1-0.01-60"/>
+    </svg></div></div>
+
+  <div class="card"><h2>8. Kwitnąca gałązka</h2><div class="preview">
+    <svg id="cherryArt" viewBox="0 0 220 120" width="230">
+      <path id="cherryMain" class="s" style="stroke-width:2.5" d="M10 100C60 90 110 70 210 32"/>
+      <path id="cherrySide" class="s" style="stroke-width:1.6" d="M115 70C122 55 135 46 152 40"/>
+    </svg></div></div>
+
+  <div class="card"><h2>9. Paproć</h2><div class="preview">
+    <svg id="fernArt" viewBox="0 0 120 200" width="100">
+      <path id="fernStem" class="s" style="stroke-width:1.6" d="M60 195C58 140 62 80 70 15"/>
+    </svg></div></div>
+
+  <div class="card"><h2>10. Ostrokrzew</h2><div class="preview">
+    <svg id="hollyArt" viewBox="0 0 160 130" width="160"></svg></div></div>
+
+  <div class="card"><h2>11. Serce z listków</h2><div class="preview">
+    <svg id="heartArt" viewBox="0 0 160 160" width="150">
+      <path id="heartPath" class="s" style="stroke-width:1.6" d="M80 140C40 112 12 82 20 52C28 22 68 20 80 50C92 20 132 22 140 52C148 82 120 112 80 140Z"/>
+    </svg></div></div>
+
+  <!-- z pliku podglad-wzorow-3.html -->
+  <div class="card"><h2>12. Zawijas z liśćmi</h2><div class="preview">
+    <svg id="flourishArt" viewBox="0 0 300 80" width="260">
+      <path id="flR1" class="s" style="stroke-width:1.6" d="M150 40C175 40 185 20 210 22C235 24 240 50 222 54C208 57 204 42 214 40"/>
+      <path id="flL1" class="s" style="stroke-width:1.6" d="M150 40C125 40 115 20 90 22C65 24 60 50 78 54C92 57 96 42 86 40"/>
+      <path id="flR2" class="s" style="stroke-width:1.2" d="M150 40C170 44 178 58 198 60C212 61 218 52 210 48"/>
+      <path id="flL2" class="s" style="stroke-width:1.2" d="M150 40C130 44 122 58 102 60C88 61 82 52 90 48"/>
+    </svg></div></div>
+
+  <div class="card"><h2>13. Prostokątna ramka z pnączem</h2><div class="preview">
+    <svg id="rectArt" viewBox="0 0 200 150" width="210">
+      <path id="rectPath" class="s" style="stroke-width:1.2" d="M15 15H185V135H15Z"/>
+    </svg></div></div>
+
+  <div class="card"><h2>14. Bukiecik z kokardą</h2><div class="preview">
+    <svg id="bouquetArt" viewBox="0 0 160 180" width="130">
+      <path id="bq1" class="s" style="stroke-width:1.5" d="M80 128C72 100 60 80 48 58"/>
+      <path id="bq2" class="s" style="stroke-width:1.5" d="M80 128C80 95 80 70 80 38"/>
+      <path id="bq3" class="s" style="stroke-width:1.5" d="M80 128C88 100 100 82 112 60"/>
+      <path id="bq4" class="s" style="stroke-width:1.5" d="M80 128C76 108 70 95 62 85"/>
+      <path id="bq5" class="s" style="stroke-width:1.5" d="M80 128C84 108 92 98 100 90"/>
+      <path class="s" style="stroke-width:1.5" d="M76 128L72 172M80 128L80 174M84 128L88 172"/>
+    </svg></div></div>
+
+  <div class="card"><h2>15. Bazie</h2><div class="preview">
+    <svg viewBox="0 0 220 120" width="230">
+      <path id="ctMain" class="s" style="stroke-width:2" d="M10 105C60 90 120 60 210 30"/>
+      <path id="ctSide" class="s" style="stroke-width:1.4" d="M100 75C115 55 130 45 150 40"/>
+    </svg></div></div>
+
+  <!-- z pliku podglad-wzorow-4.html -->
+  <div class="card"><h2>16. Szyszka z gałązką sosny</h2><div class="preview">
+    <svg id="pineArt" viewBox="0 0 200 150" width="210">
+      <path id="pineTwig" class="s" style="stroke-width:2.2" d="M10 30C70 25 130 35 190 25"/>
+      <path class="s" style="stroke-width:1.6" d="M100 32L100 45"/>
+    </svg></div></div>
+
+  <div class="card"><h2>17. Narcyz</h2><div class="preview">
+    <svg id="daffodilArt" viewBox="0 0 140 170" width="120">
+      <path fill="currentColor" opacity=".6" d="M70 165C55 130 52 100 58 70C62 100 66 130 72 160Z"/>
+      <path fill="currentColor" opacity=".6" d="M70 165C88 135 92 110 88 85C82 110 78 135 70 160Z"/>
+      <path class="s" style="stroke-width:1.8" d="M70 165C70 120 72 90 77 58"/>
+    </svg></div></div>
+
+  <div class="card"><h2>18. Maki</h2><div class="preview">
+    <svg id="poppyArt" viewBox="0 0 200 150" width="210">
+      <path class="s" style="stroke-width:1.5" d="M68 145C70 115 66 90 70 62"/>
+      <path class="s" style="stroke-width:1.5" d="M124 145C122 120 128 100 130 80"/>
+    </svg></div></div>
+
+  <div class="card"><h2>19. Gałązka jabłoni z jabłkiem</h2><div class="preview">
+    <svg id="appleArt" viewBox="0 0 200 150" width="210">
+      <path id="appleTwig" class="s" style="stroke-width:2.2" d="M10 40C60 35 110 45 190 30"/>
+      <path class="s" style="stroke-width:1.6" d="M120 41L122 62"/>
+      <path fill="currentColor" d="M122 64C112 56 98 62 98 78C98 96 110 106 122 102C134 106 146 96 146 78C146 62 132 56 122 64Z"/>
+      <ellipse fill="#fafafa" opacity=".35" cx="110" cy="76" rx="4" ry="8"/>
+    </svg></div></div>
+
+  <!-- z pliku podglad-wzorow-5.html -->
+  <div class="card"><h2>20. Pnącze powoju</h2><div class="preview">
+    <svg id="gloryArt" viewBox="0 0 90 220" width="80">
+      <path id="gloryStem" class="s" style="stroke-width:1.5" d="M45 215C25 190 65 170 45 145C25 120 65 100 45 75C25 50 65 30 45 5"/>
+    </svg></div></div>
+
+  <div class="card"><h2>21. Trawy polne</h2><div class="preview">
+    <svg id="grassArt" viewBox="0 0 260 110" width="260">
+      <path class="s" style="stroke-width:1" d="M10 102H250"/>
+    </svg></div></div>
+
+  <div class="card"><h2>22. Wiśnie</h2><div class="preview">
+    <svg id="cherriesArt" viewBox="0 0 160 160" width="140">
+      <path class="s" style="stroke-width:1.6" d="M80 25C70 60 58 90 52 110M80 25C92 60 100 85 108 102"/>
+    </svg></div></div>
+
+  <div class="card"><h2>23. Grzyby</h2><div class="preview">
+    <svg id="mushroomArt" viewBox="0 0 160 150" width="150">
+      <path fill="currentColor" opacity=".55" d="M68 135C66 115 68 95 72 85H96C100 95 102 115 100 135Z"/>
+      <path fill="currentColor" d="M45 88C45 55 70 42 84 42C98 42 123 55 123 88C110 92 58 92 45 88Z"/>
+      <ellipse fill="#fafafa" opacity=".3" cx="72" cy="60" rx="10" ry="5" transform="rotate(-25 72 60)"/>
+      <path fill="currentColor" opacity=".55" d="M118 135C117 125 118 118 120 114H130C132 118 133 125 132 135Z"/>
+      <path fill="currentColor" d="M108 116C108 102 118 96 125 96C132 96 142 102 142 116C136 118 114 118 108 116Z"/>
+      <path class="s" style="stroke-width:1" d="M25 136H145"/>
+    </svg></div></div>
+
+  <div class="card"><h2>24. Wrzos</h2><div class="preview">
+    <svg viewBox="0 0 160 160" width="140">
+      <path id="htA" class="s" style="stroke-width:1.2" d="M60 155C58 120 56 90 52 50"/>
+      <path id="htB" class="s" style="stroke-width:1.2" d="M80 155C80 115 82 80 84 35"/>
+      <path id="htC" class="s" style="stroke-width:1.2" d="M100 155C102 120 106 95 112 62"/>
+    </svg></div></div>
+
+  <div class="card"><h2>25. Krokusy</h2><div class="preview">
+    <svg id="crocusArt" viewBox="0 0 200 140" width="210">
+      <path class="s" style="stroke-width:1" d="M20 130H180"/>
+    </svg></div></div>
+
+  <div class="card"><h2>26. Podwójna ramka z kwiatkami</h2><div class="preview">
+    <svg id="initialArt" viewBox="0 0 120 120" width="140">
+      <path class="s" style="stroke-width:1.5" d="M10 10H110V110H10Z"/>
+      <path class="s" style="stroke-width:.8" d="M16 16H104V104H16Z"/>
+    </svg></div></div>
+
+  <!-- z pliku podglad-wzorow-6.html -->
+  <div class="card"><h2>27. Wzór ludowy</h2><div class="preview">
+    <svg id="folkArt" viewBox="0 0 140 170" width="130">
+      <path class="s" style="stroke-width:2" d="M70 165V42"/>
+      <path id="fkR1" class="s" style="stroke-width:1.5" d="M70 125C85 120 100 108 108 90"/>
+      <path id="fkL1" class="s" style="stroke-width:1.5" d="M70 125C55 120 40 108 32 90"/>
+      <path id="fkR2" class="s" style="stroke-width:1.5" d="M70 88C82 83 92 74 98 62"/>
+      <path id="fkL2" class="s" style="stroke-width:1.5" d="M70 88C58 83 48 74 42 62"/>
+    </svg></div></div>
+
+  <div class="card"><h2>28. Niezapominajki</h2><div class="preview">
+    <svg id="forgetArt" viewBox="0 0 200 130" width="210">
+      <path id="fgA" class="s" style="stroke-width:1.4" d="M30 125C60 110 80 80 90 55"/>
+      <path id="fgB" class="s" style="stroke-width:1.4" d="M120 125C120 100 125 80 140 60"/>
+    </svg></div></div>
+
+  <div class="card"><h2>29. Choinka z gwiazdką</h2><div class="preview">
+    <svg id="xmasArt" viewBox="0 0 140 170" width="120"></svg></div></div>
+
+  <div class="card"><h2>30. Lipa</h2><div class="preview">
+    <svg id="lindenArt" viewBox="0 -30 200 150" width="210">
+      <path id="lindenTwig" class="s" style="stroke-width:2" d="M10 30C60 28 120 35 190 25"/>
+    </svg></div></div>
+
+  <div class="card"><h2>31. Gałązka z drobnymi listkami</h2><div class="preview">
+    <svg viewBox="0 0 180 140" width="190">
+      <path id="smallTwig" class="s" style="stroke-width:1.8" d="M15 110C55 95 100 70 165 55"/>
+    </svg></div></div>
+
+  <!-- z pliku podglad-wzorow-7.html -->
+  <div class="card"><h2>32. Klamry kwiatowe</h2><div class="preview">
+    <svg id="bracketArt" viewBox="0 0 260 100" width="260">
+      <path class="s" style="stroke-width:1.6" d="M60 10C45 10 50 30 48 42C47 48 42 50 36 50C42 50 47 52 48 58C50 70 45 90 60 90"/>
+      <path class="s" style="stroke-width:1.6" d="M200 10C215 10 210 30 212 42C213 48 218 50 224 50C218 50 213 52 212 58C210 70 215 90 200 90"/>
+    </svg></div></div>
+
+  <div class="card"><h2>33. Winieta końcowa</h2><div class="preview">
+    <svg id="tailArt" viewBox="0 0 200 120" width="220">
+      <path id="tlTop" class="s" style="stroke-width:1.4" d="M30 25H170"/>
+      <path id="tlL" class="s" style="stroke-width:1.2" d="M30 25C60 40 85 70 100 100"/>
+      <path id="tlR" class="s" style="stroke-width:1.2" d="M170 25C140 40 115 70 100 100"/>
+    </svg></div></div>
+
+  <div class="card"><h2>34. Kosz z kwiatami</h2><div class="preview">
+    <svg id="basketArt" viewBox="0 0 180 170" width="160">
+      <path class="s" style="stroke-width:3" d="M48 92C48 30 132 30 132 92"/>
+    </svg></div></div>
+
+  <div class="card"><h2>35. Liść palmy</h2><div class="preview">
+    <svg viewBox="0 0 200 140" width="210">
+      <path id="palmRib" class="s" style="stroke-width:1.6" d="M20 130C60 60 120 30 190 40"/>
+    </svg></div></div>
+
+  <div class="card"><h2>36. Gałązka wierzby</h2><div class="preview">
+    <svg viewBox="0 0 200 120" width="210">
+      <path id="willowStem" class="s" style="stroke-width:1.6" d="M10 95C60 80 120 55 190 40"/>
+    </svg></div></div>
+
+  <!-- z pliku podglad-wzorow-8.html -->
+  <div class="card"><h2>37. Wazon z kwiatami</h2><div class="preview">
+    <svg id="vaseArt" viewBox="0 0 160 180" width="140"></svg></div></div>
+
+  <div class="card"><h2>38. Rabatka kwiatowa</h2><div class="preview">
+    <svg id="bedArt" viewBox="0 0 400 120" width="260">
+      <path class="s" style="stroke-width:1.2" d="M5 112H395"/>
+    </svg></div></div>
+
+  <div class="card"><h2>39. Linia z zawijasami</h2><div class="preview">
+    <svg id="ruleArt" viewBox="0 0 300 40" width="260">
+      <path class="s" style="stroke-width:1.2" d="M60 20H240"/>
+      <path class="s" style="stroke-width:1.2" d="M60 20C45 20 38 10 44 5C50 0 58 8 52 12M60 20C45 20 38 30 44 35C50 40 58 32 52 28"/>
+      <path class="s" style="stroke-width:1.2" d="M240 20C255 20 262 10 256 5C250 0 242 8 248 12M240 20C255 20 262 30 256 35C250 40 242 32 248 28"/>
+    </svg></div></div>
+
+  <div class="card"><h2>40. Listwa z jagodami</h2><div class="preview">
+    <svg id="berryBorderArt" viewBox="0 0 400 60" width="260">
+      <path id="berryStem" class="s" style="stroke-width:1.2" d="M0 30Q25 12 50 30T100 30T150 30T200 30T250 30T300 30T350 30T400 30"/>
+    </svg></div></div>
+
+  <div class="card"><h2>41. Len</h2><div class="preview">
+    <svg id="flaxArt" viewBox="0 0 200 150" width="200"></svg></div></div>
+
+  <div class="card"><h2>42. Orzechy laskowe</h2><div class="preview">
+    <svg id="hazelArt" viewBox="0 0 200 140" width="210">
+      <path id="hzTwig" class="s" style="stroke-width:2" d="M10 30C60 35 120 30 190 40"/>
+    </svg></div></div>
+
+  <div class="card"><h2>43. Piwonia</h2><div class="preview">
+    <svg id="peonyArt" viewBox="-60 -60 120 120" width="150"></svg></div></div>
+
+  <!-- z pliku podglad-wzorow-9.html -->
+  <div class="card"><h2>44. Wić roślinna</h2><div class="preview">
+    <svg id="scrollArt" viewBox="0 0 400 70" width="260">
+      <path class="s" style="stroke-width:1.3" d="M0 35Q25 10 50 35T100 35T150 35T200 35T250 35T300 35T350 35T400 35"/>
+    </svg></div></div>
+
+  <div class="card"><h2>45. Kwiat paproci</h2><div class="preview">
+    <svg id="fernFlowerArt" viewBox="-70 -70 140 140" width="150"></svg></div></div>
+
+  <div class="card"><h2>46. Gwiazda betlejemska</h2><div class="preview">
+    <svg id="poinsettiaArt" viewBox="-60 -60 120 120" width="150"></svg></div></div>
+
+  <div class="card"><h2>47. Dalia</h2><div class="preview">
+    <svg id="dahliaArt" viewBox="-60 -60 120 120" width="150"></svg></div></div>
+
+  <div class="card"><h2>48. Pałki wodne</h2><div class="preview">
+    <svg id="cattailArt" viewBox="0 0 160 180" width="140">
+      <path class="s" style="stroke-width:1" d="M15 168H145M35 174H70M95 174H130"/>
+    </svg></div></div>
+
+  <!-- z pliku podglad-wzorow-10.html -->
+  <div class="card"><h2>49. Listwa w jodełkę</h2><div class="preview">
+    <svg id="herringArt" viewBox="0 0 400 40" width="260">
+      <path id="herringLine" class="s" style="stroke-width:1" d="M15 20H385"/>
+    </svg></div></div>
+
+  <div class="card"><h2>50. Ludowa listwa z tulipanów</h2><div class="preview">
+    <svg id="folkBorderArt" viewBox="0 0 400 80" width="260">
+      <path class="s" style="stroke-width:1" d="M5 72H395"/>
+    </svg></div></div>
+
+  <div class="card"><h2>51. Pnącze powojnika</h2><div class="preview">
+    <svg id="clematisArt" viewBox="0 0 220 120" width="230">
+      <path id="clStem" class="s" style="stroke-width:1.4" d="M5 90C50 60 80 100 120 70C150 48 180 60 215 40"/>
+    </svg></div></div>
+
+  <div class="card"><h2>52. Pąki na gałązce</h2><div class="preview">
+    <svg id="budsArt" viewBox="0 0 220 120" width="230">
+      <path id="bdMain" class="s" style="stroke-width:2" d="M10 100C70 85 130 60 210 35"/>
+      <path id="bdSideA" class="s" style="stroke-width:1.3" d="M90 78C100 60 112 50 130 45"/>
+      <path id="bdSideB" class="s" style="stroke-width:1.3" d="M150 58C160 70 172 76 190 78"/>
+    </svg></div></div>
+
+  <div class="card"><h2>53. Przebiśniegi</h2><div class="preview">
+    <svg id="snowdropArt" viewBox="0 0 160 160" width="140">
+      <path class="s" style="stroke-width:1" d="M20 156H140"/>
+    </svg></div></div>
+
+  <div class="card"><h2>54. Hibiskus</h2><div class="preview">
+    <svg id="hibiscusArt" viewBox="-60 -60 120 120" width="150"></svg></div></div>
+</div>
+</div>
+<script>
+  (() => {
+    try {
+  const NS = "http://www.w3.org/2000/svg";
+  const $ = (id) => document.getElementById(id);
+
+  // Wstawia kształt w punkcie (x, y), obrócony i przeskalowany
+  // (scale może być liczbą albo "sx sy").
+  function put(parent, shapeId, x, y, deg, scale, opacity) {
+    const u = document.createElementNS(NS, "use");
+    u.setAttribute("href", "#" + shapeId);
+    u.setAttribute("transform", `translate(${x} ${y}) rotate(${deg}) scale(${scale})`);
+    if (opacity) u.setAttribute("opacity", opacity);
+    parent.appendChild(u);
+  }
+
+  function circle(parent, cx, cy, r, fill, stroke, opacity) {
+    const c = document.createElementNS(NS, "circle");
+    c.setAttribute("cx", cx); c.setAttribute("cy", cy); c.setAttribute("r", r);
+    c.setAttribute("fill", fill);
+    if (stroke) { c.setAttribute("stroke", stroke); c.setAttribute("stroke-width", 1.2); }
+    if (opacity) c.setAttribute("opacity", opacity);
+    parent.appendChild(c);
+  }
+
+  function ellipse(parent, cx, cy, rx, ry, fill, opacity) {
+    const e = document.createElementNS(NS, "ellipse");
+    e.setAttribute("cx", cx); e.setAttribute("cy", cy);
+    e.setAttribute("rx", rx); e.setAttribute("ry", ry);
+    e.setAttribute("fill", fill);
+    if (opacity) e.setAttribute("opacity", opacity);
+    parent.appendChild(e);
+  }
+
+  function line(parent, d, width, stroke, opacity) {
+    const p = document.createElementNS(NS, "path");
+    p.setAttribute("class", "s");
+    p.setAttribute("d", d);
+    if (width) p.style.strokeWidth = width;
+    if (stroke) p.style.stroke = stroke;
+    if (opacity) p.style.opacity = opacity;
+    parent.appendChild(p);
+    return p;
+  }
+
+  function shape(parent, d, fill, opacity) {
+    const p = document.createElementNS(NS, "path");
+    p.setAttribute("d", d);
+    p.setAttribute("fill", fill || "currentColor");
+    if (opacity) p.setAttribute("opacity", opacity);
+    parent.appendChild(p);
+    return p;
+  }
+
+  // Punkt na łodydze (t od 0 do 1) i kierunek łodygi w tym miejscu (w stopniach).
+  function pointAt(path, t) {
+    const L = path.getTotalLength();
+    const p = path.getPointAtLength(t * L);
+    const a = path.getPointAtLength(Math.max(t * L - 1, 0));
+    const b = path.getPointAtLength(Math.min(t * L + 1, L));
+    return { x: p.x, y: p.y, dir: Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI };
+  }
+
+  // Rozkłada kształty wzdłuż łodygi: na przemian po obu stronach albo parami.
+  function along(path, shapeId, o) {
+    const g = path.parentNode;
+    const from = o.from ?? 0.1, to = o.to ?? 1;
+    for (let i = 0; i < o.count; i++) {
+      const t = o.count === 1 ? from : from + (to - from) * i / (o.count - 1);
+      const p = pointAt(path, t);
+      const s = (o.scale ?? 1) * (1 - (o.shrink ?? 0) * t);
+      if (o.pairs) {
+        put(g, shapeId, p.x, p.y, p.dir - o.angle, s);
+        put(g, shapeId, p.x, p.y, p.dir + o.angle, s);
+      } else {
+        put(g, shapeId, p.x, p.y, p.dir + (i % 2 ? o.angle : -o.angle), s);
+      }
+    }
+  }
+
+  // Kwiatek z n płatków wokół punktu.
+  function flower(parent, x, y, s, n, shapeId, center) {
+    for (let i = 0; i < n; i++) put(parent, shapeId, x, y, i * 360 / n - 90, s);
+    if (center === "ring") {
+      circle(parent, x, y, 4.5 * s, "#fafafa", "currentColor");
+    } else {
+      circle(parent, x, y, 3.5 * s, "currentColor");
+      circle(parent, x, y, 1.6 * s, "#fafafa");
+    }
+  }
+
+  // Kwiat w kształcie kielicha (tulipan) skierowany do góry.
+  function cup(parent, x, y, s) {
+    [-112, -68, -90].forEach((a) => put(parent, "lpetal", x, y, a, `${1.6 * s} ${0.9 * s}`));
+  }
+
+  // Powtarzalne "losowe" liczby: rysunek wygląda zawsze tak samo.
+  let seed = 1;
+  const rnd = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+
+  // ---- z pliku podglad-wzorow.html ------------------------------------------
+
+  // 1. Narożnik z winoroślą
+  along($("cornerStem"), "leaf", { count: 9, from: 0.06, to: 0.94, angle: 45, scale: 0.9 });
+
+  // 2. Pnącze bluszczu
+  along($("ivyStem"), "ivy", { count: 16, from: 0.03, to: 0.97, angle: 65 });
+
+  // 3. Separator z listkami
+  const sep = $("sepArt");
+  [[-90, 1], [-135, 0.85], [-45, 0.85], [180, 0.8], [0, 0.8]].forEach(([d, s]) => put(sep, "leaf", 150, 22, d, s));
+  circle(sep, 150, 22, 3, "currentColor");
+
+  // 4. Rozeta
+  const ros = $("rosetteArt");
+  for (let i = 0; i < 8; i++) put(ros, "leaf", 0, 0, i * 45, 1.9);
+  for (let i = 0; i < 8; i++) put(ros, "leaf", 0, 0, i * 45 + 22.5, 1.15, 0.85);
+  circle(ros, 0, 0, 8, "currentColor");
+  circle(ros, 0, 0, 4, "#fafafa");
+  circle(ros, 0, 0, 2, "currentColor");
+
+  // 5. Gałązka świerku
+  along($("spruceMain"), "needle", { count: 26, from: 0.02, to: 1, angle: 50, pairs: true, scale: 0.9 });
+  along($("spruceA"), "needle", { count: 12, from: 0.05, to: 1, angle: 50, pairs: true, scale: 0.8 });
+  along($("spruceB"), "needle", { count: 12, from: 0.05, to: 1, angle: 50, pairs: true, scale: 0.8 });
+
+  // ---- z pliku podglad-wzorow-2.html ----------------------------------------
+
+  // 7. Wianek z kwiatów
+  along($("wreathPath"), "leaf", { count: 24, from: 0, to: 0.96, angle: 40, scale: 0.85 });
+  [[0, -60], [60, 0], [0, 60], [-60, 0]].forEach(([x, y]) => flower($("wreathArt"), x, y, 0.6, 5, "petal"));
+
+  // 8. Kwitnąca gałązka
+  const cherry = $("cherryArt");
+  const cMain = $("cherryMain"), cSide = $("cherrySide");
+  [[0.5, 50], [0.75, -50]].forEach(([t, a]) => {
+    const p = pointAt(cMain, t);
+    put(cherry, "leaf", p.x, p.y, p.dir + a, 0.8);
+  });
+  [0.18, 0.28].forEach((t) => {
+    const p = pointAt(cMain, t);
+    line(cherry, `M${p.x} ${p.y}l2 -6`, 1);
+    circle(cherry, p.x + 2, p.y - 8, 3, "currentColor");
+  });
+  [[cMain, 0.38, 0.65], [cMain, 0.62, 0.6], [cMain, 0.86, 0.65], [cMain, 1, 0.55], [cSide, 0.55, 0.5], [cSide, 1, 0.6]]
+    .forEach(([path, t, s]) => {
+      const p = pointAt(path, t);
+      flower(cherry, p.x, p.y, s, 5, "petal");
+    });
+
+  // 9. Paproć
+  along($("fernStem"), "frond", { count: 24, from: 0.08, to: 0.97, angle: 65, pairs: true, scale: 1.5, shrink: 0.75 });
+  const fernTip = pointAt($("fernStem"), 1);
+  put($("fernArt"), "frond", fernTip.x, fernTip.y, fernTip.dir, 0.45);
+
+  // 10. Ostrokrzew
+  const holly = $("hollyArt");
+  [-155, -25, 80].forEach((d) => put(holly, "holly", 80, 70, d, 1.9));
+  [[74, 66], [86, 66], [80, 76]].forEach(([x, y]) => {
+    circle(holly, x, y, 6, "currentColor");
+    circle(holly, x - 2, y - 2, 1.8, "#fafafa", null, 0.6);
+  });
+
+  // 11. Serce z listków
+  along($("heartPath"), "leaf", { count: 26, from: 0.02, to: 0.98, angle: 40, scale: 0.7 });
+  flower($("heartArt"), 80, 50, 0.7, 5, "petal");
+  flower($("heartArt"), 80, 140, 0.5, 5, "petal");
+
+  // ---- z pliku podglad-wzorow-3.html ----------------------------------------
+
+  // 12. Zawijas z liśćmi
+  const fl = $("flourishArt");
+  ["flR1", "flL1"].forEach((id) => along($(id), "leaf", { count: 5, from: 0.12, to: 0.6, angle: 45, scale: 0.75 }));
+  ["flR2", "flL2"].forEach((id) => along($(id), "leaf", { count: 3, from: 0.25, to: 0.7, angle: 45, scale: 0.6 }));
+  put(fl, "leaf", 150, 40, -90, 1);
+  put(fl, "leaf", 150, 40, 90, 0.7);
+  circle(fl, 150, 40, 4, "currentColor");
+  circle(fl, 150, 40, 1.8, "#fafafa");
+
+  // 13. Prostokątna ramka z pnączem
+  const rect = $("rectArt");
+  along($("rectPath"), "leaf", { count: 44, from: 0, to: 0.99, angle: 45, scale: 0.5 });
+  [[15, 15], [185, 15], [185, 135], [15, 135]].forEach(([x, y]) => flower(rect, x, y, 0.55, 5, "petal"));
+
+  // 14. Bukiecik z kokardą
+  const bq = $("bouquetArt");
+  along($("bq4"), "leaf", { count: 2, from: 0.6, to: 1, angle: 40, scale: 0.9 });
+  along($("bq5"), "leaf", { count: 2, from: 0.6, to: 1, angle: 40, scale: 0.9 });
+  along($("bq2"), "leaf", { count: 2, from: 0.3, to: 0.6, angle: 50, scale: 0.8 });
+  flower(bq, 48, 58, 0.8, 5, "petal");
+  flower(bq, 80, 38, 0.9, 14, "ray", "ring");
+  flower(bq, 112, 60, 0.8, 6, "petal", "ring");
+  line(bq, "M80 130C66 118 58 132 80 132M80 130C94 118 102 132 80 132", 1.8);
+  line(bq, "M80 132L70 150M80 132L90 150", 1.5);
+
+  // 15. Bazie
+  along($("ctMain"), "catkin", { count: 7, from: 0.15, to: 1, angle: 30, scale: 1.2 });
+  along($("ctSide"), "catkin", { count: 3, from: 0.3, to: 1, angle: 30, scale: 1 });
+
+  // ---- z pliku podglad-wzorow-4.html ----------------------------------------
+
+  // 16. Szyszka z gałązką sosny
+  const pine = $("pineArt");
+  along($("pineTwig"), "pineNeedle", { count: 14, from: 0.04, to: 1, angle: 35, pairs: true, scale: 2.6 });
+  for (let j = 0; j < 9; j++) {
+    const y = 46 + j * 8;
+    const w = 18 * Math.sin(Math.PI * (j + 0.6) / 9.5);
+    const n = j % 2 ? 3 : 4;
+    for (let i = 0; i < n; i++) {
+      const x = 100 + (i - (n - 1) / 2) * (2 * w / n);
+      put(pine, "cone", x, y, 0, 1);
+    }
+  }
+
+  // 17. Narcyz
+  const daf = $("daffodilArt");
+  for (let i = 0; i < 6; i++) put(daf, "lpetal", 77, 54, i * 60 - 90, 1.4);
+  circle(daf, 77, 54, 9, "#fafafa", "currentColor");
+  circle(daf, 77, 54, 5, "currentColor", null, 0.6);
+
+  // 18. Maki
+  const poppy = $("poppyArt");
+  put(poppy, "leaf", 68, 125, -140, "1.6 0.5");
+  put(poppy, "leaf", 125, 128, -45, "1.6 0.5");
+  [[70, 60, 1.3], [130, 78, 1.05]].forEach(([x, y, s]) => {
+    [-45, 45, 135, -135].forEach((a) => put(poppy, "poppy", x, y, a, s));
+    circle(poppy, x, y, 6 * s, "#fafafa");
+    circle(poppy, x, y, 3.5 * s, "currentColor");
+    for (let k = 0; k < 10; k++) {
+      const a = k * 36 * Math.PI / 180;
+      circle(poppy, x + 8.5 * s * Math.cos(a), y + 8.5 * s * Math.sin(a), 0.9, "#fafafa", null, 0.8);
+    }
+  });
+  
+  // 19. Gałązka jabłoni z jabłkiem
+  const apple = $("appleArt");
+  along($("appleTwig"), "leaf", { count: 4, from: 0.15, to: 0.9, angle: 55, scale: 1.4 });
+  put(apple, "leaf", 121, 55, -30, 0.7);
+  flower(apple, 60, 37, 0.55, 5, "petal", "ring");
+
+  // ---- z pliku podglad-wzorow-5.html ----------------------------------------
+
+  // 20. Pnącze powoju
+  const gl = $("gloryArt");
+  along($("gloryStem"), "heartleaf", { count: 7, from: 0.08, to: 0.95, angle: 65, scale: 1 });
+  [[0.22, 1], [0.55, -1], [0.85, 1]].forEach(([t, side]) => {
+    const p = pointAt($("gloryStem"), t);
+    put(gl, "trumpet", p.x, p.y, p.dir + side * 80, 1.1);
+  });
+  line(gl, "M45 120c-8-4-10-12-3-14c4-1 5 4 2 5", 0.8);
+  line(gl, "M45 50c8 4 10 12 3 14c-4 1-5-4-2-5", 0.8);
+
+  // 21. Trawy polne
+  const gr = $("grassArt");
+  seed = 9;
+  for (let x = 20; x <= 240; x += 11) {
+    put(gr, "leaf", x, 102, -90 + (rnd() * 50 - 25), `${1.4 + rnd() * 1.4} 0.2`);
+  }
+  [35, 80, 125, 170, 215].forEach((x, i) => {
+    const h = 55 + rnd() * 30, lean = (i % 2 ? 1 : -1) * (8 + rnd() * 10);
+    const st = line(gr, `M${x} 102Q${x + lean / 2} ${102 - h / 2} ${x + lean} ${102 - h}`, 1);
+    along(st, "small", { count: 6, from: 0.6, to: 1, angle: 25, pairs: true, scale: 0.75 });
+  });
+
+  // 22. Wiśnie
+  const chs = $("cherriesArt");
+  put(chs, "leaf", 80, 25, -20, 2);
+  put(chs, "leaf", 80, 25, 200, 1.2);
+  circle(chs, 80, 25, 2.5, "currentColor");
+  [[52, 122], [108, 114]].forEach(([x, y]) => {
+    circle(chs, x, y, 13, "currentColor");
+    circle(chs, x - 4, y - 4, 3, "#fafafa", null, 0.45);
+  });
+
+  // 23. Grzyby
+  const mu = $("mushroomArt");
+  seed = 3;
+  for (let x = 30; x <= 140; x += 9) {
+    put(mu, "leaf", x, 136, -90 + (rnd() * 50 - 25), `${1.1 + rnd() * 0.6} 0.22`);
+  }
+
+  // 24. Wrzos
+  ["htA", "htB", "htC"].forEach((id) =>
+    along($(id), "small", { count: 12, from: 0.4, to: 1, angle: 50, pairs: true, scale: 0.8 }));
+
+  // 25. Krokusy
+  const cr = $("crocusArt");
+  [[55, 1], [100, 1.2], [145, 0.9]].forEach(([x, s]) => {
+    const top = 130 - 45 * s;
+    put(cr, "leaf", x, 130, -100, `${2 * s} 0.25`);
+    put(cr, "leaf", x, 130, -78, `${1.9 * s} 0.25`);
+    line(cr, `M${x} 130V${top}`, 1.4);
+    [-112, -68, -90].forEach((a) => put(cr, "lpetal", x, top, a, `${1.6 * s} ${0.9 * s}`));
+  });
+
+  // 26. Podwójna ramka z kwiatkami
+  const ini = $("initialArt");
+  [[10, 10], [110, 10], [110, 110], [10, 110]].forEach(([x, y]) => flower(ini, x, y, 0.45, 5, "petal"));
+
+  // ---- z pliku podglad-wzorow-6.html ----------------------------------------
+
+  // 27. Wzór ludowy
+  const fk = $("folkArt");
+  ["fkR1", "fkL1", "fkR2", "fkL2"].forEach((id) =>
+    along($(id), "leaf", { count: 2, from: 0.3, to: 0.65, angle: 45, pairs: true, scale: 0.6 }));
+  put(fk, "leaf", 70, 160, -150, 1.4);
+  put(fk, "leaf", 70, 160, -30, 1.4);
+  put(fk, "leaf", 70, 140, -125, 0.9);
+  put(fk, "leaf", 70, 140, -55, 0.9);
+  [["fkR1", 0.65], ["fkL1", 0.65], ["fkR2", 0.5], ["fkL2", 0.5]].forEach(([id, s]) => {
+    const p = pointAt($(id), 1);
+    flower(fk, p.x, p.y, s, 6, "lpetal", "ring");
+  });
+  for (let i = 0; i < 10; i++) put(fk, "lpetal", 70, 36, i * 36, 1.3);
+  for (let i = 0; i < 10; i++) put(fk, "lpetal", 70, 36, i * 36 + 18, 0.75);
+  circle(fk, 70, 36, 5, "#fafafa", "currentColor");
+  circle(fk, 70, 36, 2, "currentColor");
+
+  // 28. Niezapominajki
+  const fg = $("forgetArt");
+  ["fgA", "fgB"].forEach((id) => {
+    const path = $(id);
+    along(path, "leaf", { count: 2, from: 0.25, to: 0.55, angle: 50, scale: 1 });
+    const tip = pointAt(path, 1);
+    [[0, 0, 0.55], [-9, 6, 0.5], [8, 7, 0.5], [-3, 14, 0.45], [12, -4, 0.35]].forEach(([dx, dy, s]) =>
+      flower(fg, tip.x + dx, tip.y + dy, s, 5, "lpetal", "ring"));
+  });
+
+  // 29. Choinka z gwiazdką
+  const xt = $("xmasArt");
+  shape(xt, "M64 140H76V158H64Z");
+  for (let j = 3; j >= 0; j--) {
+    const yTop = 28 + j * 24, yBot = yTop + 42 + j * 4, w = 18 + j * 14;
+    const t = shape(xt, `M70 ${yTop}L${70 - w} ${yBot}Q${70 - w / 2} ${yBot + 8} 70 ${yBot}Q${70 + w / 2} ${yBot + 8} ${70 + w} ${yBot}Z`);
+    t.setAttribute("stroke", "rgba(255,255,255,.55)");
+    t.setAttribute("stroke-width", "1");
+  }
+  [[56, 72], [84, 92], [62, 112], [92, 122], [48, 132]].forEach(([x, y]) => circle(xt, x, y, 4, "#fafafa", "currentColor"));
+  let star = "";
+  for (let k = 0; k < 10; k++) {
+    const r = k % 2 ? 5 : 12, a = (k * 36 - 90) * Math.PI / 180;
+    star += (k ? "L" : "M") + (70 + r * Math.cos(a)).toFixed(1) + " " + (22 + r * Math.sin(a)).toFixed(1);
+  }
+  shape(xt, star + "Z");
+
+  // 30. Lipa (tylko liście i łodyga)
+  const ld = $("lindenArt");
+  [[0.12, 2.2], [0.45, 1.9], [0.82, 2.1]].forEach(([t, s]) => {
+    const p = pointAt($("lindenTwig"), t);
+    put(ld, "heartleaf", p.x, p.y, p.dir + 75, s);
+  });
+
+  // 31. Gałązka z drobnymi listkami
+  along($("smallTwig"), "small", { count: 8, from: 0.08, to: 0.885, angle: 45, scale: 1.5 });
+
+  // ---- z pliku podglad-wzorow-7.html ----------------------------------------
+
+  // 32. Klamry kwiatowe
+  const br = $("bracketArt");
+  [[0, 1], [-30, 0.8], [30, 0.8]].forEach(([a, s]) => {
+    put(br, "leaf", 36, 50, 180 + a, s);
+    put(br, "leaf", 224, 50, a, s);
+  });
+  [[60, 10], [60, 90], [200, 10], [200, 90]].forEach(([x, y]) => flower(br, x, y, 0.4, 5, "lpetal", "ring"));
+
+  // 33. Winieta końcowa
+  const tl = $("tailArt");
+  along($("tlTop"), "leaf", { count: 7, from: 0.08, to: 0.92, angle: 60, scale: 0.7 });
+  along($("tlL"), "leaf", { count: 4, from: 0.15, to: 0.8, angle: 45, scale: 0.6 });
+  along($("tlR"), "leaf", { count: 4, from: 0.15, to: 0.8, angle: 45, scale: 0.6 });
+  for (let i = 0; i < 8; i++) put(tl, "lpetal", 100, 48, i * 45, 0.9);
+  circle(tl, 100, 48, 4, "#fafafa", "currentColor");
+  flower(tl, 100, 100, 0.55, 5, "lpetal");
+  circle(tl, 100, 114, 2.5, "currentColor");
+
+  // 34. Kosz z kwiatami
+  const bk = $("basketArt");
+  [[60, 90, -150, 1.1], [130, 90, -30, 1.1], [100, 84, -80, 0.9], [78, 84, -115, 0.8]].forEach(([x, y, a, s]) => put(bk, "leaf", x, y, a, s));
+  flower(bk, 70, 78, 0.8, 6, "lpetal", "ring");
+  for (let i = 0; i < 16; i++) put(bk, "blade", 98, 68, i * 22.5, 0.6);
+  circle(bk, 98, 68, 4, "#fafafa", "currentColor");
+  flower(bk, 124, 80, 0.75, 5, "lpetal");
+  flower(bk, 88, 88, 0.5, 5, "lpetal", "ring");
+  shape(bk, "M40 95H140L128 160H52Z");
+  shape(bk, "M35 88H145V97H35Z");
+  [110, 125, 140, 152].forEach((y) => {
+    const w = 46 - (y - 95) * 12 / 65;
+    line(bk, `M${90 - w} ${y}H${90 + w}`, 1.3, "#fafafa", 0.45);
+  });
+  [60, 75, 90, 105, 120].forEach((x) => line(bk, `M${x} 98L${90 + (x - 90) * 0.8} 158`, 1.3, "#fafafa", 0.45));
+
+  // 35. Liść palmy
+  along($("palmRib"), "narrow", { count: 16, from: 0.15, to: 1, angle: 55, pairs: true, scale: 1.9, shrink: 0.6 });
+
+  // 36. Gałązka wierzby
+  along($("willowStem"), "narrow", { count: 9, from: 0.08, to: 0.8978, angle: 40, scale: 1.3 });
+
+  // ---- z pliku podglad-wzorow-8.html ----------------------------------------
+
+  // 37. Wazon z kwiatami
+  const vs = $("vaseArt");
+  [[55, 45], [80, 28], [105, 48], [64, 70], [98, 72]].forEach(([x, y]) =>
+    line(vs, `M80 100Q${(80 + x) / 2} ${(100 + y) / 2 + 8} ${x} ${y}`, 1.3));
+  [[70, 86, -150, 1.1], [92, 86, -30, 1.1], [80, 80, -95, 0.9]].forEach(([x, y, a, s]) => put(vs, "leaf", x, y, a, s));
+  flower(vs, 55, 45, 0.75, 6, "lpetal", "ring");
+  cup(vs, 80, 30, 1.1);
+  for (let i = 0; i < 16; i++) put(vs, "blade", 105, 48, i * 22.5, 0.55);
+  circle(vs, 105, 48, 3.5, "#fafafa", "currentColor");
+  flower(vs, 64, 70, 0.5, 5, "lpetal");
+  flower(vs, 98, 72, 0.5, 5, "lpetal", "ring");
+  shape(vs, "M60 110C50 110 46 120 48 135C50 155 60 170 80 170C100 170 110 155 112 135C114 120 110 110 100 110L96 100H64Z");
+  shape(vs, "M60 96H100V102H60Z");
+  line(vs, "M58 124C56 136 60 150 68 158", 2.5, "#fafafa", 0.4);
+
+  // 38. Rabatka kwiatowa
+  const bd = $("bedArt");
+  seed = 33;
+  for (let i = 0; i < 11; i++) {
+    const x = 25 + i * 35;
+    const h = 45 + rnd() * 35;
+    const top = 112 - h;
+    put(bd, "narrow", x, 112, -120, 1);
+    put(bd, "narrow", x, 112, -60, 1);
+    line(bd, `M${x} 112V${top}`, 1.2);
+    const kind = i % 4;
+    if (kind === 0) cup(bd, x, top, 1);
+    else if (kind === 1) flower(bd, x, top, 0.6, 5, "lpetal", "ring");
+    else if (kind === 2) { for (let k = 0; k < 14; k++) put(bd, "blade", x, top, k * 360 / 14, 0.45); circle(bd, x, top, 3, "#fafafa", "currentColor"); }
+    else for (let k = 0; k < 7; k++) { const y = top + k * 5; put(bd, "small", x, y, -150, 0.55); put(bd, "small", x, y, -30, 0.55); }
+  }
+
+  // 39. Linia z zawijasami
+  const rl = $("ruleArt");
+  put(rl, "leaf", 64, 20, 200, 0.6);
+  put(rl, "leaf", 236, 20, -20, 0.6);
+  [0, 90, 180, 270].forEach((a) => put(rl, "small", 150, 20, a, 0.7));
+  circle(rl, 150, 20, 2, "currentColor");
+
+  // 40. Listwa z jagodami
+  const bbb = $("berryBorderArt");
+  along($("berryStem"), "leaf", { count: 16, from: 0.03, to: 0.97, angle: 55, scale: 0.65 });
+  for (let i = 0; i < 8; i++) {
+    const x = 25 + i * 50, up = i % 2 === 0;
+    const y = up ? 14 : 46, d = up ? -5 : 5;
+    [[-3.5, 0], [3.5, 0], [0, d]].forEach(([dx, dy]) => {
+      circle(bbb, x + dx, y + dy, 3.6, "currentColor");
+      circle(bbb, x + dx - 1, y + dy - 1, 1, "#fafafa", null, 0.5);
+    });
+  }
+
+  // 41. Len
+  const fx = $("flaxArt");
+  [[45, 35], [75, 22], [100, 15], [128, 25], [158, 40]].forEach(([x, y], i) => {
+    const st = line(fx, `M100 145Q${(100 + x) / 2 + (i - 2) * 6} ${(145 + y) / 2} ${x} ${y}`, 1);
+    along(st, "narrow", { count: 4, from: 0.2, to: 0.7, angle: 25, scale: 0.55 });
+    if (i % 2 === 0) flower(fx, x, y, 0.55, 5, "lpetal", "ring");
+    else { circle(fx, x, y, 4, "currentColor"); circle(fx, x - 1.2, y - 1.2, 1.1, "#fafafa", null, 0.5); }
+  });
+
+  // 42. Orzechy laskowe
+  const hz = $("hazelArt");
+  [[0.15, 1.9], [0.75, 1.7], [0.95, 1.4]].forEach(([t, s]) => {
+    const p = pointAt($("hzTwig"), t);
+    put(hz, "serrate", p.x, p.y, p.dir + 70, s);
+  });
+  line(hz, "M110 33C110 40 106 46 102 50M110 33C112 40 116 46 120 52", 1.2);
+  [[102, 62], [120, 64]].forEach(([x, y]) => {
+    ellipse(hz, x, y, 9, 10, "currentColor");
+    ellipse(hz, x, y - 6, 5, 2, "#fafafa", 0.4);
+    [-150, -120, -90, -60, -30].forEach((a) => put(hz, "small", x, y - 7, a, 0.75));
+  });
+
+  // 43. Piwonia
+  const pn = $("peonyArt");
+  put(pn, "leaf", 0, 30, 50, 2.3);
+  put(pn, "leaf", 0, 30, 130, 2.3);
+  for (let i = 0; i < 8; i++) put(pn, "lpetal", 0, 0, i * 45, "2.4 2.2");
+  for (let i = 0; i < 8; i++) put(pn, "lpetal", 0, 0, i * 45 + 22.5, "1.8 1.7");
+  for (let i = 0; i < 8; i++) put(pn, "lpetal", 0, 0, i * 45 + 10, "1.2 1.1");
+  circle(pn, 0, 0, 5, "currentColor");
+  line(pn, "M-3 0c0-2 3-2 3 0c0 3-5 3-5 0", 0.9, "#fafafa", 0.6);
+
+  // ---- z pliku podglad-wzorow-9.html ----------------------------------------
+
+  // 44. Wić roślinna
+  const sc = $("scrollArt");
+  for (let k = 0; k < 8; k++) {
+    const x = 25 + k * 50, up = k % 2 === 0;
+    const m = (y) => (up ? y : 70 - y);   // łuki w dół są odbiciem łuków w górę
+    line(sc, `M${x} ${m(22.5)}C${x + 4} ${m(8)} ${x + 22} ${m(6)} ${x + 24} ${m(16)}C${x + 25} ${m(24)} ${x + 15} ${m(25)} ${x + 15} ${m(19)}`, 1);
+    put(sc, "leaf", x, m(22.5), up ? -150 : 150, 0.6);
+    put(sc, "small", x + 8, m(12), up ? -100 : 100, 0.6);
+    circle(sc, x + 15, m(19), 2, "currentColor");
+  }
+
+  // 45. Kwiat paproci
+  const ff = $("fernFlowerArt");
+  for (let i = 0; i < 24; i++) {
+    const a = i * 15 * Math.PI / 180, r = i % 2 ? 52 : 62;
+    line(ff, `M${22 * Math.cos(a)} ${22 * Math.sin(a)}L${r * Math.cos(a)} ${r * Math.sin(a)}`, 0.8, null, 0.5);
+  }
+  for (let i = 0; i < 5; i++) put(ff, "point", 0, 0, i * 72 - 90, 2.4);
+  for (let i = 0; i < 5; i++) put(ff, "point", 0, 0, i * 72 - 54, 1.5);
+  circle(ff, 0, 0, 7, "#fafafa", "currentColor");
+  circle(ff, 0, 0, 3, "currentColor");
+  [[-48, -40], [50, -30], [44, 46], [-50, 38]].forEach(([x, y]) => {
+    shape(ff, `M${x} ${y - 6}L${x + 1.5} ${y - 1.5}L${x + 6} ${y}L${x + 1.5} ${y + 1.5}L${x} ${y + 6}L${x - 1.5} ${y + 1.5}L${x - 6} ${y}L${x - 1.5} ${y - 1.5}Z`);
+  });
+
+  // 46. Gwiazda betlejemska
+  const ps = $("poinsettiaArt");
+  for (let i = 0; i < 6; i++) put(ps, "leaf", 0, 0, i * 60 - 90, 2.4);
+  for (let i = 0; i < 6; i++) put(ps, "leaf", 0, 0, i * 60 - 60, 1.7, 0.85);
+  for (let i = 0; i < 6; i++) {
+    const a = i * 60 * Math.PI / 180;
+    circle(ps, 5 * Math.cos(a), 5 * Math.sin(a), 2.6, "#fafafa", "currentColor");
+  }
+  circle(ps, 0, 0, 2.6, "#fafafa", "currentColor");
+
+  // 47. Dalia
+  const dh = $("dahliaArt");
+  [[16, 2.3, 0], [16, 1.85, 11.25], [12, 1.4, 0], [10, 1.0, 18], [8, 0.6, 0]].forEach(([n, s, off]) => {
+    for (let i = 0; i < n; i++) put(dh, "point", 0, 0, i * 360 / n + off, s);
+  });
+  circle(dh, 0, 0, 3, "currentColor");
+  circle(dh, 0, 0, 1.4, "#fafafa");
+
+  // 48. Pałki wodne
+  const ct = $("cattailArt");
+  shape(ct, "M70 168C62 120 50 80 30 50C48 85 62 125 74 168Z", null, 0.65);
+  shape(ct, "M90 168C100 130 112 100 132 72C116 105 104 135 94 168Z", null, 0.65);
+  shape(ct, "M80 168C78 130 82 100 88 72C86 102 84 132 84 168Z", null, 0.5);
+  [[60, 40], [80, 25], [100, 55]].forEach(([x, top]) => {
+    line(ct, `M${x} 168V${top}`, 1.4);
+    shape(ct, `M${x - 4.5} ${top + 14}h9v32a4.5 4.5 0 0 1-9 0Z`);
+    shape(ct, `M${x - 4.5} ${top + 14}a4.5 4.5 0 0 1 9 0Z`);
+  });
+
+  // ---- z pliku podglad-wzorow-10.html ---------------------------------------
+
+  // 49. Listwa w jodełkę
+  const hb = $("herringArt");
+  along($("herringLine"), "narrow", { count: 24, from: 0.02, to: 0.98, angle: 40, pairs: true, scale: 0.75 });
+  circle(hb, 15, 20, 3, "currentColor");
+  circle(hb, 385, 20, 3, "currentColor");
+
+  // 50. Ludowa listwa z tulipanów
+  const fb = $("folkBorderArt");
+  for (let i = 0; i < 5; i++) {
+    const x = 40 + i * 80;
+    line(fb, `M${x} 72V40`, 1.4);
+    put(fb, "leaf", x, 64, -150, 1.3);
+    put(fb, "leaf", x, 64, -30, 1.3);
+    line(fb, `M${x - 20} 52c-6-2-6-9 0-9M${x + 20} 52c6-2 6-9 0-9`, 1);
+    shape(fb, `M${x} 40C${x - 10} 38 ${x - 14} 26 ${x - 10} 14C${x - 6} 22 ${x - 3} 24 ${x} 16C${x + 3} 24 ${x + 6} 22 ${x + 10} 14C${x + 14} 26 ${x + 10} 38 ${x} 40Z`);
+    line(fb, `M${x} 36V24M${x - 5} 34L${x - 7} 24M${x + 5} 34L${x + 7} 24`, 0.8, "#fafafa", 0.6);
+  }
+  for (let i = 1; i < 5; i++) {
+    const x = i * 80;
+    flower(fb, x, 50, 0.45, 6, "lpetal", "ring");
+    circle(fb, x, 36, 1.8, "currentColor");
+    circle(fb, x, 64, 1.8, "currentColor");
+  }
+
+  // 51. Pnącze powojnika
+  const cm = $("clematisArt");
+  along($("clStem"), "leaf", { count: 7, from: 0.05, to: 0.95, angle: 60, scale: 0.75 });
+  [0.22, 0.55, 0.88].forEach((t) => {
+    const p = pointAt($("clStem"), t);
+    for (let i = 0; i < 6; i++) put(cm, "point", p.x, p.y, i * 60 + 15, "2 1.4");
+    circle(cm, p.x, p.y, 4, "#fafafa", "currentColor");
+    for (let i = 0; i < 8; i++) {
+      const a = i * 45 * Math.PI / 180;
+      circle(cm, p.x + 6 * Math.cos(a), p.y + 6 * Math.sin(a), 0.9, "#fafafa", null, 0.8);
+    }
+  });
+  line(cm, "M80 82c-4 8 4 14 8 8c2-4-3-6-4-3", 0.8);
+  line(cm, "M170 52c4-8 12-6 10 0c-1 4-5 3-4 1", 0.8);
+
+  // 52. Pąki na gałązce
+  const bds = $("budsArt");
+  along($("bdMain"), "point", { count: 6, from: 0.15, to: 0.9, angle: 35, scale: 0.85 });
+  ["bdSideA", "bdSideB"].forEach((id) => along($(id), "point", { count: 3, from: 0.25, to: 0.8, angle: 35, scale: 0.7 }));
+  ["bdMain", "bdSideA", "bdSideB"].forEach((id) => {
+    const tip = pointAt($(id), 1);
+    put(bds, "small", tip.x, tip.y, tip.dir - 30, 0.9);
+    put(bds, "small", tip.x, tip.y, tip.dir + 30, 0.9);
+    put(bds, "point", tip.x, tip.y, tip.dir, "0.9 0.6");
+  });
+
+  // 53. Przebiśniegi
+  const sd = $("snowdropArt");
+  shape(sd, "M50 156C44 120 42 95 46 70C50 95 54 120 54 156Z", null, 0.6);
+  shape(sd, "M110 156C116 125 120 100 116 78C112 100 108 125 106 156Z", null, 0.6);
+  [[50, 66, 1], [82, 52, 1.1], [112, 72, 0.9]].forEach(([x, y, s], i) => {
+    line(sd, `M${x + (i - 1) * 6} 156C${x} 120 ${x} ${y + 20} ${x + 8} ${y}C${x + 13} ${y - 4} ${x + 16} ${y + 2} ${x + 16} ${y + 6}`, 1.3);
+    const fx2 = x + 16, fy2 = y + 8;
+    circle(sd, fx2, fy2 - 1, 2.2 * s, "currentColor");
+    [70, 110].forEach((a) => put(sd, "lpetal", fx2, fy2, a, `${1.4 * s} ${0.85 * s}`));
+    put(sd, "lpetal", fx2, fy2, 90, `${1.5 * s} ${0.9 * s}`);
+  });
+
+  // 54. Hibiskus (tylko płatki z liniami)
+  const hi = $("hibiscusArt");
+  for (let i = 0; i < 5; i++) put(hi, "lpetal", 0, 0, i * 72 - 90, "2.6 2.4");
+  for (let i = 0; i < 5; i++) {
+    const a = (i * 72 - 90) * Math.PI / 180;
+    [-0.25, 0, 0.25].forEach((d) =>
+      line(hi, `M${6 * Math.cos(a)} ${6 * Math.sin(a)}L${30 * Math.cos(a + d)} ${30 * Math.sin(a + d)}`, 0.6, "#fafafa", 0.55));
+  }
+  circle(hi, 0, 0, 5, "#fafafa", "currentColor");   // otwór w środku kwiatu
+    } catch (e) {
+      console.error("Nie udało się narysować wzorów:", e);
+    }
+  })();
+</script>
 <!-- Local copies of the libraries (lib folder): the app starts without
      internet and never changes by itself. -->
 <script src="lib/react.production.min.js"></script>
@@ -1180,6 +2315,165 @@
       el.style.zIndex = on ? "1001" : "";
     });
   }
+  // ---- Wzory (narzędzie "Wzory") ---------------------------------------------
+  // Wzory są rysowane przy starcie w ukrytym #pattern-source. Tutaj każdy
+  // zamienia się w gotowy kawałek SVG. key ("w1", "w2"...) trafia do pliku,
+  // więc nie zależy od kolejności na liście.
+  const PATTERNS = (() => {
+    const src = document.getElementById("pattern-source");
+    if (!src) return [];
+    const list = [];
+    src.querySelectorAll(".card").forEach((card) => {
+      const title = card.querySelector("h2");
+      const svg = card.querySelector("svg");
+      if (!title || !svg) return;
+      const m = /^\s*(\d+)\.\s*(.*)$/.exec(title.textContent);
+      const vb = (svg.getAttribute("viewBox") || "").trim().split(/[\s,]+/).map(Number);
+      if (!m || vb.length !== 4 || !(vb[2] > 0) || !(vb[3] > 0)) return;
+      const copy = svg.cloneNode(true);
+      copy.querySelectorAll("[id]").forEach((el) => el.removeAttribute("id"));
+      list.push({
+        key: "w" + m[1],
+        name: m[2].trim(),                      // nazwa bez numeru
+        viewBox: vb.join(" "),
+        ratio: vb[3] / vb[2],                   // wysokość / szerokość
+        width: parseFloat(svg.getAttribute("width")) || vb[2],
+        html: copy.innerHTML
+      });
+    });
+    // Zostają tylko wspólne kształty (<defs>), z których korzystają wzory.
+    src.querySelectorAll(".grid").forEach((g) => g.remove());
+    return list;
+  })();
+  const PATTERN_MAP = new Map(PATTERNS.map((p) => [p.key, p]));
+
+  // Nowy wzór: rozmiar z podglądu wzorów razy PATTERN_SCALE (w jednostkach
+  // strony), ale najwyżej MAX_PATTERN_PART szerokości / wysokości strony.
+  const PATTERN_SCALE = 0.5;
+  const MAX_PATTERN_PART = 0.5;
+  const ORNAMENT_HANDLE = 11;      // strzałki rozmiaru (jak przy obrazach)
+  const MIN_ORNAMENT_SIDE = 16;    // najkrótszy bok wzoru przy zmniejszaniu
+  const ROT_SNAP_DEG = 4;          // blisko 0/90/180/270°: wzór "przyskakuje"
+  const ORN_BTN_W = 28, ORN_BTN_H = 20, ORN_BTN_GAP = 6;   // przyciski obrotu i odbicia
+  const CORNERS = ["nw", "ne", "sw", "se"];
+  const CORNER_ANGLE = { se: 45, sw: 135, nw: 225, ne: 315 };
+  const RESIZE_CURSORS = ["ew-resize", "nwse-resize", "ns-resize", "nesw-resize"];
+
+  // Środek elementu o "promieniu" e w przedziale [0, max]: element zostaje na stronie.
+  function clampCenter(v, e, max) {
+    return 2 * e >= max ? max / 2 : Math.min(Math.max(v, e), max - e);
+  }
+
+  // Wzór w pikselach strony: rozmiar, środek, obrót i połowy obróconego
+  // prostokąta, który go otacza (ex, ey).
+  function ornamentGeom(o, pageW, pageH, pat) {
+    const W = o.w * pageW, H = W * pat.ratio;
+    const a = (o.rot || 0) * Math.PI / 180, cos = Math.cos(a), sin = Math.sin(a);
+    return {
+      W, H, cos, sin,
+      cx: o.x * pageW, cy: o.y * pageH,
+      ex: (Math.abs(W * cos) + Math.abs(H * sin)) / 2,
+      ey: (Math.abs(W * sin) + Math.abs(H * cos)) / 2
+    };
+  }
+
+  // Położenie wzoru, jego strzałek rozmiaru i przycisków obrotu / odbicia
+  // (piksele strony). Ten sam wynik służy do rysowania przez React
+  // i do przesuwania na żywo.
+  function ornamentLayout(o, pageW, pageH) {
+    const pat = PATTERN_MAP.get(o.pattern);
+    if (!pat) return null;
+    const g = ornamentGeom(o, pageW, pageH, pat);
+    const hs = Math.max(5, Math.min(ORNAMENT_HANDLE, Math.floor(Math.min(g.W, g.H) / 4)));
+
+    // Strzałki rozmiaru w rogach. Kursor zgodny z tym, w którą stronę
+    // naprawdę patrzy róg obróconego wzoru.
+    const handles = {};
+    CORNERS.forEach((c) => {
+      const sx = c[1] === "e" ? 1 : -1, sy = c[0] === "s" ? 1 : -1;
+      const eff = (((CORNER_ANGLE[c] + (o.rot || 0)) % 180) + 180) % 180;
+      handles["r" + c] = {
+        left: sx > 0 ? g.W - hs : 0, top: sy > 0 ? g.H - hs : 0,
+        width: hs, height: hs,
+        cursor: RESIZE_CURSORS[Math.round(eff / 45) % 4]
+      };
+    });
+
+    const fitX = (x) => Math.min(Math.max(x, 0), pageW - ORN_BTN_W);
+    const fitY = (y) => Math.min(Math.max(y, 0), pageH - ORN_BTN_H);
+
+    // Obrót: pod wzorem, na środku jego szerokości (nad wzorem, gdy pod
+    // nim nie ma już miejsca na stronie).
+    let rTop = g.cy + g.ey + ORN_BTN_GAP;
+    if (rTop + ORN_BTN_H > pageH) rTop = g.cy - g.ey - ORN_BTN_GAP - ORN_BTN_H;
+    const rotate = { left: fitX(g.cx - ORN_BTN_W / 2), top: fitY(rTop) };
+
+    // Lustrzane odbicie: przy prawym górnym rogu wzoru, na prawo od niego.
+    // Przy prawej krawędzi strony nad rogiem, a gdy i tam brak miejsca,
+    // tuż pod strzałką rozmiaru w tym rogu.
+    const right = g.cx + g.ex, top = g.cy - g.ey;
+    let mLeft = right + ORN_BTN_GAP, mTop = top;
+    if (mLeft + ORN_BTN_W > pageW) {
+      mLeft = right - ORN_BTN_W;
+      mTop = top - ORN_BTN_GAP - ORN_BTN_H;
+      if (mTop < 0) mTop = top + ORNAMENT_HANDLE + 4;
+    }
+    const mirror = { left: fitX(mLeft), top: fitY(mTop) };
+
+    return {
+      box: {
+        left: g.cx - g.W / 2, top: g.cy - g.H / 2, width: g.W, height: g.H,
+        transform: `rotate(${o.rot || 0}deg)`
+      },
+      flip: o.flip ? "scaleX(-1)" : "",
+      handles,
+      rotate,
+      mirror
+    };
+  }
+
+  function applyLayoutStyle(el, s) {
+    if (!el || !s) return;
+    ["left", "top", "width", "height"].forEach((k) => {
+      if (s[k] !== undefined) el.style[k] = s[k] + "px";
+    });
+    if (s.transform !== undefined) el.style.transform = s.transform;
+    if (s.cursor) el.style.cursor = s.cursor;
+  }
+
+  // Ustawia wzór (ze strzałkami i przyciskami) wprost na ekranie: podczas
+  // przeciągania, bez przerysowywania całej książki.
+  function layoutOrnamentDom(pageEl, o) {
+    const L = ornamentLayout(o, pageEl.offsetWidth, pageEl.offsetHeight);
+    if (!L) return;
+    const el = pageEl.querySelector(`.page-ornament[data-ornament-id="${o.id}"]`);
+    if (el) {
+      applyLayoutStyle(el, L.box);
+      el.querySelectorAll("[data-handle]").forEach((hd) => applyLayoutStyle(hd, L.handles[hd.dataset.handle]));
+      const svg = el.querySelector(".pattern-svg");
+      if (svg) svg.style.transform = L.flip;
+    }
+    applyLayoutStyle(pageEl.querySelector(`.ornament-rotate-btn[data-ornament-id="${o.id}"]`), L.rotate);
+    applyLayoutStyle(pageEl.querySelector(`.ornament-mirror[data-ornament-id="${o.id}"]`), L.mirror);
+  }
+
+  // Wzór (i jego przycisk) nad wszystkim innym na stronie podczas przeciągania.
+  function raiseOrnamentDom(pageEl, id, on) {
+    pageEl.querySelectorAll(`[data-ornament-id="${id}"]`).forEach((el) => {
+      el.style.zIndex = on ? "1000" : "";
+    });
+  }
+
+  // Kursor całej aplikacji na czas obracania / zmiany rozmiaru (null: koniec).
+  function setDragCursor(cur) {
+    const d = document.documentElement;
+    if (cur) {
+      d.style.setProperty("--orn-cursor", cur);
+      d.classList.add("ornament-cursor");
+    } else {
+      d.classList.remove("ornament-cursor");
+    }
+  }
 
   // Give a text box focus and put the caret / selection made by `place`
   // into it. The flipbook may re-insert the pages (or WebView2 may still be
@@ -1273,6 +2567,51 @@
           }
         }));
       }), 
+      // Wzory: nad obrazami, pod polami tekstowymi. Łapią kliknięcia tylko
+      // w trybie przesuwania (patrz CSS).
+      (props.ornaments || []).flatMap((o) => {
+        const pat = PATTERN_MAP.get(o.pattern);
+        const L = pat && ornamentLayout(o, props.pageW, props.pageH);
+        if (!L) return [];
+        return [
+          h("div", {
+            key: "orn" + o.id,
+            className: "page-ornament" + (props.selectedOrnamentId === o.id ? " selected" : ""),
+            "data-ornament-id": o.id,
+            style: L.box
+          },
+            h("svg", {
+              className: "pattern-svg",
+              viewBox: pat.viewBox,
+              style: { transform: L.flip },
+              dangerouslySetInnerHTML: { __html: pat.html }
+            }),
+            // Strzałki rozmiaru w rogach (ten sam wygląd co przy obrazach).
+            ...CORNERS.map((c) => h("div", {
+              key: "r" + c,
+              className: "image-handle " + c,
+              "data-handle": "r" + c,
+              style: L.handles["r" + c]
+            }))
+          ),
+          // Obrót: pod wzorem, na środku jego szerokości.
+          h("div", {
+            key: "orr" + o.id,
+            className: "ornament-rotate-btn",
+            "data-ornament-id": o.id,
+            title: "Obrót",
+            style: L.rotate
+          }, h(RotateIcon)),
+          // Lustrzane odbicie: przy prawym górnym rogu.
+          h("div", {
+            key: "orm" + o.id,
+            className: "ornament-mirror",
+            "data-ornament-id": o.id,
+            title: "Odbicie lustrzane",
+            style: L.mirror
+          }, h(MirrorIcon))
+        ];
+      }),
       props.boxes.map((box) => {
         const commitFontSize = (input) => {
           if (input.value === input.dataset.startValue) return; // nothing changed
@@ -1864,7 +3203,53 @@
       h("path", { d: "M9 22 L15 22" })                           // 2. linia podpisu
     );
   }
+  // Ornament z czterech płatków: "wzory".
+  function PatternIcon() {
+    return h("svg", { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+      h("path", { d: "M12 12C9.5 9.5 9.5 4.5 12 3C14.5 4.5 14.5 9.5 12 12" }),
+      h("path", { d: "M12 12C14.5 9.5 19.5 9.5 21 12C19.5 14.5 14.5 14.5 12 12" }),
+      h("path", { d: "M12 12C14.5 14.5 14.5 19.5 12 21C9.5 19.5 9.5 14.5 12 12" }),
+      h("path", { d: "M12 12C9.5 14.5 4.5 14.5 3 12C4.5 9.5 9.5 9.5 12 12" })
+    );
+  }
 
+  // Dwa trójkąty po obu stronach osi: "lustrzane odbicie".
+  function MirrorIcon() {
+    return h("svg", { width: 16, height: 14, viewBox: "0 0 24 22", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+      h("path", { d: "M12 1V21", strokeDasharray: "2 3" }),
+      h("path", { d: "M9 5L3 17H9Z", fill: "currentColor" }),
+      h("path", { d: "M15 5L21 17H15Z" })
+    );
+  }
+  
+  // Okrągła strzałka: "obrót".
+  function RotateIcon() {
+    return h("svg", { width: 14, height: 14, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2.4, strokeLinecap: "round", strokeLinejoin: "round" },
+      h("path", { d: "M20 12a8 8 0 1 1-2.34-5.66L20 8" }),
+      h("path", { d: "M20 3v5h-5" })
+    );
+  }
+  
+  // Lista wzorów na lewo od książki: dwie kolumny, przewijana.
+  function PatternPanel({ selected, onSelect }) {
+    return h("div", { className: "pattern-panel" },
+      h("div", { className: "pattern-panel-title" }, "Wzory"),
+      PATTERNS.length
+        ? h("div", { className: "pattern-grid" },
+            PATTERNS.map((p) => h("div", {
+              key: p.key,
+              className: "pattern-card" + (selected === p.key ? " selected" : ""),
+              onClick: () => onSelect(p.key)
+            },
+              h("div", { className: "pattern-thumb" },
+                h("svg", { className: "pattern-svg", viewBox: p.viewBox, dangerouslySetInnerHTML: { __html: p.html } })
+              ),
+              h("div", { className: "pattern-name" }, p.name)
+            ))
+          )
+        : h("div", { className: "pattern-empty" }, "Brak wzorów do wyświetlenia.")
+    );
+  }
   // Miniatura rozkładówki z kropkami danej opcji (przyciski na pasku).
   function AlignLayoutIcon({ index }) {
     const pts = alignPoints(index);
@@ -1936,8 +3321,7 @@
     );
   }
 
-  // Only one of "text" / "move" / null can be active at a time.
-  const TOOL_NONE = null, TOOL_TEXT = "text", TOOL_MOVE = "move";
+  const TOOL_NONE = null, TOOL_TEXT = "text", TOOL_MOVE = "move", TOOL_PATTERN = "pattern";
 
   // Invisible character that lets the caret sit inside an empty element
   // (a new font size, font, bold or italic that nothing has been typed into yet).
@@ -3203,7 +4587,7 @@
   // w tej samej postaci.
 
   const FILE_APP = "KronikaSzkolna";
-  const FILE_VERSION = 1;
+  const FILE_VERSION = 2;   // 2: doszły wzory (pliki w wersji 1 nadal się otwierają)
 
   // false, gdy strona nie działa w programie (np. otwarta w przeglądarce).
   function hostPost(text) {
@@ -3270,7 +4654,9 @@
       boxes: doc.boxes.map((b) => b.anchor
         ? [pg(b.page), r(b.width), b.html, r(b.anchor.x), r(b.anchor.y), !!b.anchor.line, b.anchor.imageId ?? null]
         : [pg(b.page), r(b.width), b.html, r(b.left), r(b.top)]),
-      images: doc.images.map((im) => [im.id, pg(im.page), r(im.left), r(im.top), r(im.w), r(im.h)])
+      images: doc.images.map((im) => [im.id, pg(im.page), r(im.left), r(im.top), r(im.w), r(im.h)]),
+      ornaments: (doc.ornaments || []).map((o) =>
+        [o.id, pg(o.page), o.pattern, r(o.x), r(o.y), r(o.w), r(o.rot), !!o.flip])
     });
   }
 
@@ -3323,12 +4709,24 @@
       boxes.push({ id: b.id, page: b.page, left: b.left, top: b.top,
                    width: isNum(b.width) ? b.width : undefined, anchor, html });
     }
-
+    // Wzory (pliki z wersji 1 ich nie mają).
+    const ornaments = [];
+    if (d.ornaments != null) {
+      if (!Array.isArray(d.ornaments)) return null;
+      const ornIds = new Set();
+      for (const o of d.ornaments) {
+        if (!o || !isId(o.id) || ornIds.has(o.id) || !keys.has(o.page)) return null;
+        if (typeof o.pattern !== "string" || ![o.x, o.y, o.w, o.rot].every(isNum) || o.w <= 0) return null;
+        ornIds.add(o.id);
+        if (!PATTERN_MAP.has(o.pattern)) continue;   // wzór, którego ten program nie zna
+        ornaments.push({ id: o.id, page: o.page, pattern: o.pattern, x: o.x, y: o.y, w: o.w, rot: o.rot, flip: !!o.flip });
+      }
+    }
     let maxKey = 0;
     d.pageKeys.forEach((k) => { maxKey = Math.max(maxKey, parseInt(k.slice(1), 10)); });
     const nextPageNum = Math.max(maxKey + 1, Number.isInteger(d.nextPageNum) ? d.nextPageNum : 0);
 
-    return { app: FILE_APP, version: FILE_VERSION, pageKeys: d.pageKeys.slice(), nextPageNum, boxes, images };
+    return { app: FILE_APP, version: FILE_VERSION, pageKeys: d.pageKeys.slice(), nextPageNum, boxes, images, ornaments };
   }
 
   function App() {
@@ -3428,19 +4826,31 @@
     const [selectedId, setSelectedId] = useState(null);
     const selectedImageIdRef = useRef(null);
     const [selectedImageId, setSelectedImageId] = useState(null);
-    // Select a text box (or nothing, with null). Always clears a selected picture.
+    // Move mode: zaznaczony wzór (tylko do obramowania).
+    const [selectedOrnamentId, setSelectedOrnamentId] = useState(null);
+    // Select a text box (or nothing, with null). Always clears a selected picture / pattern.
     const selectBox = (id) => {
       selectedIdRef.current = id;
       setSelectedId(id);
       selectedImageIdRef.current = null;
       setSelectedImageId(null);
+      setSelectedOrnamentId(null);
     };
-    // Select a picture. Always clears a selected text box.
+    // Select a picture. Always clears a selected text box / pattern.
     const selectImage = (id) => {
       selectedIdRef.current = null;
       setSelectedId(null);
       selectedImageIdRef.current = id;
       setSelectedImageId(id);
+      setSelectedOrnamentId(null);
+    };
+    // Zaznacz wzór. Zawsze odznacza pole tekstowe i obraz.
+    const selectOrnament = (id) => {
+      selectedIdRef.current = null;
+      setSelectedId(null);
+      selectedImageIdRef.current = null;
+      setSelectedImageId(null);
+      setSelectedOrnamentId(id);
     };
 
     // Internal clipboard: only filled by Ctrl+C in move mode, so text copied
@@ -3548,7 +4958,21 @@
     const imagesRef = useRef([]);
     imagesRef.current = images;
     const imageIdRef = useRef(0);
-
+    // ---- Narzędzie "Wzory" -------------------------------------------------
+    // Wzory na stronach: { id, page, pattern, x, y, w, rot, flip }.
+    // x / y: środek wzoru (ułamki szerokości / wysokości strony),
+    // w: szerokość (ułamek szerokości strony), wysokość wynika z kształtu wzoru.
+    const [ornaments, setOrnaments] = useState([]);
+    const ornamentsRef = useRef([]);   // dla natywnych listenerów (podpiętych raz)
+    ornamentsRef.current = ornaments;
+    const ornamentIdRef = useRef(0);
+    // Wzór wybrany na liście (klucz) albo null.
+    const [selectedPattern, setSelectedPatternState] = useState(null);
+    const selectedPatternRef = useRef(null);
+    const selectPattern = (key) => {
+      selectedPatternRef.current = key;
+      setSelectedPatternState(key);
+    };
     // "Dodaj obraz" window. The ref is for the native listeners (attached once).
     const [imageDialogOpen, setImageDialogOpen] = useState(false);
     const imageDialogOpenRef = useRef(false);
@@ -3722,7 +5146,12 @@
       if (coverLock) return;
       selectTool(TOOL_MOVE);
     };
-
+    // Wzory: każde włączenie zaczyna się bez wybranego wzoru.
+    const togglePatternMode = () => {
+      if (coverLock) return;
+      if (toolRef.current !== TOOL_PATTERN) selectPattern(null);
+      selectTool(TOOL_PATTERN);
+    };
     // ---- Delete the currently displayed spread -----------------------------
 
     const openDeleteDialog = () => {
@@ -3778,7 +5207,8 @@
 
       // Pictures on the deleted pages go too.
       setImages((prev) => prev.filter((im) => !removed.has(im.page)));
-
+      // Wzory z usuniętych stron też.
+      setOrnaments((prev) => prev.filter((o) => !removed.has(o.page)));
       // Tools can't be active on a cover.
       if (next === 0) {
         toolRef.current = TOOL_NONE;
@@ -4006,6 +5436,9 @@
       }).filter((b) => htmlHasText(b.html)),
       images: imagesRef.current.map((im) => ({
         id: im.id, page: im.page, src: im.src, left: im.left, top: im.top, w: im.w, h: im.h
+      })),
+      ornaments: ornamentsRef.current.map((o) => ({
+        id: o.id, page: o.page, pattern: o.pattern, x: o.x, y: o.y, w: o.w, rot: o.rot, flip: !!o.flip
       }))
     });
 
@@ -4090,10 +5523,13 @@
 
       boxIdRef.current = doc.boxes.reduce((m, b) => Math.max(m, b.id), 0);
       imageIdRef.current = doc.images.reduce((m, im) => Math.max(m, im.id), 0);
+      ornamentIdRef.current = doc.ornaments.reduce((m, o) => Math.max(m, o.id), 0);
+      selectPattern(null);
       nextPageNumRef.current = doc.nextPageNum;
 
       setBoxes(doc.boxes);
       setImages(doc.images);
+      setOrnaments(doc.ornaments);
       setPageKeys(doc.pageKeys);
       setPage(0);                    // otwarta kronika zaczyna się od okładki
       setClosing(false);
@@ -4179,8 +5615,7 @@
     // main.cpp musi wiedzieć, czy przy zamykaniu jest coś do stracenia.
     useEffect(() => { hostPost("dirty\n" + (dirty ? "1" : "0")); }, [dirty]);
 
-    // Zmiany w stanie (pola, obrazy, strony)...
-    useEffect(() => { checkDirty(); }, [boxes, images, pageKeys]);
+    useEffect(() => { checkDirty(); }, [boxes, images, pageKeys, ornaments]);
 
     // ...i zmiany robione wprost na ekranie (pisanie, pogrubienie, kolor...),
     // sprawdzane co najwyżej co 150 ms.
@@ -4493,7 +5928,185 @@
 		commitImageFollowers(id);
       });
     };
+    // ---- Wzory: dodawanie, przesuwanie, zmiana rozmiaru, obrót -------------
 
+    // Kliknięcie strony w trybie wzorów: wybrany wzór pojawia się ze środkiem
+    // w miejscu kliknięcia (cały na stronie). Wzór zostaje wybrany, więc
+    // kolejne kliknięcia dodają kolejne kopie.
+    const placePattern = (pageEl, clientX, clientY) => {
+      const key = selectedPatternRef.current;
+      if (!key) {
+        showToast("Najpierw wybierz wzór z listy po lewej stronie");
+        return;
+      }
+      const pat = PATTERN_MAP.get(key);
+      const pageW = pageEl.offsetWidth, pageH = pageEl.offsetHeight;
+      if (!pat || !pageW || !pageH) return;
+      const innerW = pageEl.clientWidth, innerH = pageEl.clientHeight;
+      const rect = pageEl.getBoundingClientRect();
+
+      // Rozmiar jak w podglądzie wzorów (jednostki strony), ale nie większy
+      // niż MAX_PATTERN_PART strony.
+      const u = pageW / REF_PAGE_W;
+      const W = Math.min(pat.width * u * PATTERN_SCALE,
+                         innerW * MAX_PATTERN_PART, innerH * MAX_PATTERN_PART / pat.ratio);
+      const H = W * pat.ratio;
+      let cx = clampCenter(clientX - rect.left, W / 2, innerW);
+      let cy = clampCenter(clientY - rect.top, H / 2, innerH);
+      // Wyrównywanie do punktów: obok kropki środek wzoru ląduje na niej.
+      const snap = snapNear(pageEl, (cx - W / 2) / pageW, (cy - H / 2) / pageH, W / pageW, H / pageH);
+      if (snap) { cx = snap.left * pageW + W / 2; cy = snap.top * pageH + H / 2; }
+
+      const id = ++ornamentIdRef.current;
+      setOrnaments((prev) => [...prev, {
+        id, page: pageEl.dataset.pageKey, pattern: key,
+        x: cx / pageW, y: cy / pageH, w: W / pageW, rot: 0, flip: false
+      }]);
+    };
+
+    // Przesuwanie wzoru (tryb przesuwania). Zawsze zostaje cały na stronie.
+    const startOrnamentDrag = (id, ornEl, startX, startY) => {
+      const o = ornamentsRef.current.find((x) => x.id === id);
+      const pat = o && PATTERN_MAP.get(o.pattern);
+      const pageEl = ornEl && ornEl.parentElement;
+      if (!o || !pat || !pageEl) return;
+      const pageW = pageEl.offsetWidth, pageH = pageEl.offsetHeight;
+      const innerW = pageEl.clientWidth, innerH = pageEl.clientHeight;
+      const g = ornamentGeom(o, pageW, pageH, pat);
+
+      let cur = { x: o.x, y: o.y }, moved = false;
+      raiseOrnamentDom(pageEl, id, true);
+
+      trackPointer((ev) => {
+        const p = ev.touches ? ev.touches[0] : ev;
+        let cx = clampCenter(g.cx + p.clientX - startX, g.ex, innerW);
+        let cy = clampCenter(g.cy + p.clientY - startY, g.ey, innerH);
+        const snap = snapNear(pageEl, (cx - g.ex) / pageW, (cy - g.ey) / pageH, 2 * g.ex / pageW, 2 * g.ey / pageH);
+        if (snap) { cx = snap.left * pageW + g.ex; cy = snap.top * pageH + g.ey; }
+        cur = { x: cx / pageW, y: cy / pageH };
+        moved = true;
+        layoutOrnamentDom(pageEl, { ...o, ...cur });
+      }, () => {
+        raiseOrnamentDom(pageEl, id, false);
+        if (!moved) return;
+        setOrnaments((prev) => prev.map((x) => x.id === id ? { ...x, ...cur } : x));
+      });
+    };
+
+    // Zmiana rozmiaru za róg (tryb przesuwania). Przeciwny róg stoi w miejscu
+    // (także przy obróconym wzorze), proporcje zostają, wzór nie wychodzi
+    // poza stronę.
+    const startOrnamentResize = (id, pageEl, corner, cursor, startX, startY) => {
+      const o = ornamentsRef.current.find((x) => x.id === id);
+      const pat = o && PATTERN_MAP.get(o.pattern);
+      if (!o || !pat || !pageEl) return;
+      const pageW = pageEl.offsetWidth, pageH = pageEl.offsetHeight;
+      const innerW = pageEl.clientWidth, innerH = pageEl.clientHeight;
+      const g = ornamentGeom(o, pageW, pageH, pat);
+      const ratio = pat.ratio;
+      const sx = corner[1] === "e" ? 1 : -1, sy = corner[0] === "s" ? 1 : -1;
+
+      // Punkt we wzorze (względem środka, bez obrotu) -> piksele strony.
+      const toPage = (lx, ly) => ({ x: g.cx + lx * g.cos - ly * g.sin, y: g.cy + lx * g.sin + ly * g.cos });
+      const A = toPage(-sx * g.W / 2, -sy * g.H / 2);   // róg, który stoi w miejscu
+      const D = toPage(sx * g.W / 2, sy * g.H / 2);     // róg, za który ciągniemy
+      const centerFor = (W) => {
+        const H = W * ratio;
+        return {
+          x: A.x + (sx * W / 2) * g.cos - (sy * H / 2) * g.sin,
+          y: A.y + (sx * W / 2) * g.sin + (sy * H / 2) * g.cos
+        };
+      };
+      const fits = (W) => {
+        const H = W * ratio, c = centerFor(W);
+        const ex = (Math.abs(W * g.cos) + Math.abs(H * g.sin)) / 2;
+        const ey = (Math.abs(W * g.sin) + Math.abs(H * g.cos)) / 2;
+        return c.x - ex >= -0.5 && c.x + ex <= innerW + 0.5 && c.y - ey >= -0.5 && c.y + ey <= innerH + 0.5;
+      };
+      // Krótszy bok co najmniej MIN_ORNAMENT_SIDE (chyba że już był mniejszy).
+      const minW = Math.min(ratio >= 1 ? MIN_ORNAMENT_SIDE : MIN_ORNAMENT_SIDE / ratio, g.W);
+
+      let curW = g.W, moved = false;
+      setDragCursor(cursor || "nwse-resize");
+      raiseOrnamentDom(pageEl, id, true);
+
+      trackPointer((ev) => {
+        const p = ev.touches ? ev.touches[0] : ev;
+        // Miejsce rogu we "własnym" układzie wzoru (bez obrotu).
+        const vx = D.x + p.clientX - startX - A.x, vy = D.y + p.clientY - startY - A.y;
+        const ux = vx * g.cos + vy * g.sin, uy = -vx * g.sin + vy * g.cos;
+        // Liczy się kierunek, w którym myszka pociągnęła dalej.
+        let W = Math.max(sx * ux, sy * uy / ratio, minW);
+        if (!fits(W)) {
+          if (!fits(minW)) return;
+          let lo = minW, hi = W;
+          for (let i = 0; i < 14; i++) {
+            const mid = (lo + hi) / 2;
+            if (fits(mid)) lo = mid; else hi = mid;
+          }
+          W = lo;
+        }
+        curW = W;
+        moved = true;
+        const c = centerFor(W);
+        layoutOrnamentDom(pageEl, { ...o, x: c.x / pageW, y: c.y / pageH, w: W / pageW });
+      }, () => {
+        setDragCursor(null);
+        raiseOrnamentDom(pageEl, id, false);
+        if (!moved) return;
+        const c = centerFor(curW);
+        setOrnaments((prev) => prev.map((x) => x.id === id
+          ? { ...x, x: c.x / pageW, y: c.y / pageH, w: curW / pageW } : x));
+      });
+    };
+
+    // Obrót za okrągłą strzałkę (tryb przesuwania). Wokół środka wzoru;
+    // blisko 0/90/180/270° wzór przyskakuje, z wciśniętym Shift obraca się
+    // co 15°. Przy krawędzi strony środek przesuwa się tak, żeby wzór został
+    // cały na stronie.
+    const startOrnamentRotate = (id, ornEl, startX, startY) => {
+      const o = ornamentsRef.current.find((x) => x.id === id);
+      const pat = o && PATTERN_MAP.get(o.pattern);
+      const pageEl = ornEl && ornEl.parentElement;
+      if (!o || !pat || !pageEl) return;
+      const pageW = pageEl.offsetWidth, pageH = pageEl.offsetHeight;
+      const innerW = pageEl.clientWidth, innerH = pageEl.clientHeight;
+      const W = o.w * pageW, H = W * pat.ratio;
+      const cx0 = o.x * pageW, cy0 = o.y * pageH;
+
+      const r = ornEl.getBoundingClientRect();
+      const ccx = r.left + r.width / 2, ccy = r.top + r.height / 2;   // środek na ekranie
+      const a0 = Math.atan2(startY - ccy, startX - ccx);
+
+      let cur = { x: o.x, y: o.y, rot: o.rot || 0 }, moved = false;
+      setDragCursor("var(--rotate-cursor)");
+      raiseOrnamentDom(pageEl, id, true);
+
+      trackPointer((ev) => {
+        const p = ev.touches ? ev.touches[0] : ev;
+        let rot = (o.rot || 0) + (Math.atan2(p.clientY - ccy, p.clientX - ccx) - a0) * 180 / Math.PI;
+        if (ev.shiftKey) {
+          rot = Math.round(rot / 15) * 15;
+        } else {
+          const n = Math.round(rot / 90) * 90;
+          if (Math.abs(rot - n) < ROT_SNAP_DEG) rot = n;
+        }
+        rot = ((rot % 360) + 360) % 360;
+
+        const a = rot * Math.PI / 180, cos = Math.abs(Math.cos(a)), sin = Math.abs(Math.sin(a));
+        const ex = (W * cos + H * sin) / 2, ey = (W * sin + H * cos) / 2;
+        if (2 * ex > innerW || 2 * ey > innerH) return;   // tak obrócony nie zmieści się na stronie
+
+        cur = { x: clampCenter(cx0, ex, innerW) / pageW, y: clampCenter(cy0, ey, innerH) / pageH, rot };
+        moved = true;
+        layoutOrnamentDom(pageEl, { ...o, ...cur });
+      }, () => {
+        setDragCursor(null);
+        raiseOrnamentDom(pageEl, id, false);
+        if (!moved) return;
+        setOrnaments((prev) => prev.map((x) => x.id === id ? { ...x, ...cur } : x));
+      });
+    };
     const startBoxResize = (id, startX, edge) => {
       const box = boxesRef.current.find((b) => b.id === id);
       if (!box) return;
@@ -4891,7 +6504,7 @@
         // inner page places it. Nothing else in the book reacts (no flipping,
         // no covers).
         if (pendingImageRef.current) {
-          if (e.target.closest(".toggle-btn, .file-btn")) return; // the tool buttons still work
+          if (e.target.closest(".toggle-btn")) return; // the tool buttons still work
           e.preventDefault();
           e.stopPropagation();
           const pageEl = e.target.closest(".page");
@@ -4902,7 +6515,8 @@
           return;
         }
         if (toolRef.current === TOOL_NONE) return; // let the book flip normally
-        if (e.target.closest(".toggle-btn, .file-btn")) return; // never intercept the tool buttons
+        if (e.target.closest(".toggle-btn")) return; // never intercept the tool buttons
+        if (e.target.closest(".pattern-panel")) return; // lista wzorów działa normalnie
         if (e.target.closest(".fontsize-control")) return; // never intercept the fontsize control
         if (e.target.closest(".fontsize-spin")) return;
         if (e.target.closest(".format-btn")) return;
@@ -4927,6 +6541,33 @@
 
         if (toolRef.current === TOOL_MOVE) {
           e.preventDefault();
+          // Strzałka w rogu wzoru: zmiana rozmiaru. Sprawdzane przed obrazami,
+          // bo te strzałki mają klasę image-handle.
+          const ornHandle = e.target.closest(".page-ornament [data-handle]");
+          if (ornHandle) {
+            const ornEl = ornHandle.closest(".page-ornament");
+            const id = Number(ornEl.dataset.ornamentId);
+            selectOrnament(id);
+            startOrnamentResize(id, ornEl.parentElement, ornHandle.dataset.handle.slice(1),
+                                ornHandle.style.cursor, point.clientX, point.clientY);
+            return;
+          }
+          // Przycisk obrotu pod wzorem: przeciągnij, żeby obrócić.
+          const rotateEl = e.target.closest(".ornament-rotate-btn");
+          if (rotateEl) {
+            const id = Number(rotateEl.dataset.ornamentId);
+            const ornEl = rotateEl.parentElement.querySelector(`.page-ornament[data-ornament-id="${id}"]`);
+            selectOrnament(id);
+            if (ornEl) startOrnamentRotate(id, ornEl, point.clientX, point.clientY);
+            return;
+          }
+          const mirrorEl = e.target.closest(".ornament-mirror");
+          if (mirrorEl) {
+            const id = Number(mirrorEl.dataset.ornamentId);
+            selectOrnament(id);
+            setOrnaments((prev) => prev.map((o) => o.id === id ? { ...o, flip: !o.flip } : o));
+            return;
+          }
           // A corner handle: resize that picture.
           const handleEl = e.target.closest(".image-handle");
           if (handleEl) {
@@ -4937,16 +6578,31 @@
             return;
           }
           const imageEl = !boxEl && e.target.closest(".page-image");
+          const ornamentEl = !boxEl && e.target.closest(".page-ornament");
           if (boxEl) {
             const id = Number(boxEl.dataset.boxId);
             selectBox(id);
             startBoxDrag(id, point.clientX, point.clientY);
+          } else if (ornamentEl) {
+            const id = Number(ornamentEl.dataset.ornamentId);
+            selectOrnament(id);
+            startOrnamentDrag(id, ornamentEl, point.clientX, point.clientY);
           } else if (imageEl) {
             const id = Number(imageEl.dataset.imageId);
             selectImage(id);
             startImageDrag(id, imageEl, point.clientX, point.clientY);
           } else {
             selectBox(null);
+          }
+          return;
+        }
+
+        // Narzędzie wzorów: kliknięcie strony (nie okładki) dodaje wybrany wzór.
+        if (toolRef.current === TOOL_PATTERN) {
+          e.preventDefault();
+          const pageEl = e.target.closest(".page");
+          if (pageEl && !pageEl.classList.contains("page-cover")) {
+            placePattern(pageEl, point.clientX, point.clientY);
           }
           return;
         }
@@ -4987,7 +6643,8 @@
 
       const handleMouseMove = (e) => {
         if (toolRef.current === TOOL_NONE && !pendingImageRef.current) return;
-        if (e.target.closest(".toggle-btn, .file-btn")) return;
+        if (e.target.closest(".toggle-btn")) return;
+        if (e.target.closest(".pattern-panel")) return;
         if (e.target.closest(".fontsize-control")) return;
         if (e.target.closest(".font-family-control")) return;
 
@@ -5063,15 +6720,19 @@
 
     const boxesFor = (pageKey) => boxes.filter((b) => b.page === pageKey);
     const imagesFor = (pageKey) => images.filter((im) => im.page === pageKey);
+    const ornamentsFor = (pageKey) => ornaments.filter((o) => o.page === pageKey);
     const wrapClass = "book-wrap"
       + (tool === TOOL_TEXT ? " text-mode" : "")
       + (tool === TOOL_MOVE ? " move-mode" : "")
+      + (tool === TOOL_PATTERN ? " pattern-mode" + (selectedPattern ? " pattern-ready" : "") : "")
       + (pendingImage ? (pendingImage.loading ? " image-loading" : " image-mode") : "");
 
     const surfaceProps = (pageKey, cover) => ({
       pageKey, cover,
       boxes: boxesFor(pageKey),
       images: imagesFor(pageKey),
+	  ornaments: ornamentsFor(pageKey),
+      selectedOrnamentId,
       textMode: tool === TOOL_TEXT,
       boxRefs,
       onBoxBlur: pruneIfEmpty,
@@ -5148,19 +6809,6 @@
             ...pageKeys.map((k) => h(Surface, { key: k, ...surfaceProps(k, false) })),
             h(Surface, { key: "c2", ...surfaceProps("c2", true) })
           ),
-			// "Zapisz" / "Otwórz" przy lewym górnym rogu książki (działają też na okładkach).
-			h("div", { className: "file-row" },
-            h("div", {
-              className: "file-btn" + (hasFile && !dirty ? " disabled" : ""),
-              onMouseDown: (e) => e.preventDefault(),   // nie zabiera fokusu z tekstu
-              onClick: requestSave
-            }, "Zapisz"),
-            h("div", {
-              className: "file-btn",
-              onMouseDown: (e) => e.preventDefault(),
-              onClick: requestOpen
-            }, "Otwórz")
-          ),
           h("div", { className: "toggle-row" },
             h("div", {
               className: "toggle-btn" + (tool === TOOL_TEXT ? " active" : "") + (coverLock ? " disabled" : ""),
@@ -5190,7 +6838,13 @@
               "data-tip": "Dodaj obraz" + coverNote,
               onClick: openImageDialog
             }, h(AddImageIcon)),
-                        // Wyrównywanie do punktów: działa razem z innymi narzędziami,
+            // Wzory: przycisk wciśnięty tak długo, jak narzędzie jest włączone.
+            h("div", {
+              className: "toggle-btn" + (tool === TOOL_PATTERN ? " active" : "") + (coverLock ? " disabled" : ""),
+              "data-tip": "Wzory: wybierz wzór z listy po lewej i klikaj strony, aby go dodać" + coverNote,
+              onClick: togglePatternMode
+            }, h(PatternIcon)),
+            // Wyrównywanie do punktów: działa razem z innymi narzędziami,
             // ale nie razem z wyrównywaniem do obrazów.
             h("div", {
               className: "toggle-btn" + (alignOn ? " active" : "")
@@ -5210,6 +6864,8 @@
               onClick: toggleCaption
             }, h(CaptionAlignIcon))
           ),
+          // Lista wzorów na lewo od książki (tylko przy włączonym narzędziu).
+          tool === TOOL_PATTERN && h(PatternPanel, { selected: selectedPattern, onSelect: selectPattern }),
           !hideHints && h("div", { className: "hint-stack" },
             alignOn && h("div", { className: "move-hint" },
               "Aby wyrównać zawartość na stronie, przeciągnij tekst lub obraz tak, żeby jego środek znalazł się blisko kropki.",
@@ -5241,16 +6897,33 @@
         ),
         h("div", { className: "book-freeze", ref: freezeRef })
       ),
-      h("div", { className: "controls" },
-        h("button", { onClick: () => {
-          flipDirRef.current = "prev";
-          bookRef.current.pageFlip().flipPrev();
-        } }, "◀ Poprzednia"),
-        h("span", { className: "counter" }, pageLabel(page, total, orientation)),
-        h("button", { onClick: () => {
-          flipDirRef.current = "next";
-          bookRef.current.pageFlip().flipNext();
-        } }, "Następna ▶")
+      // Wiersz pod książką: przewracanie stron na środku, "Zapisz" / "Otwórz"
+      // przy prawej krawędzi książki. Szerokość = szerokość rozkładówki.
+      h("div", { className: "controls", style: { width: (size.w * 2) + "px" } },
+        h("div", { className: "nav-group" },
+          h("button", { onClick: () => {
+            flipDirRef.current = "prev";
+            bookRef.current.pageFlip().flipPrev();
+          } }, "◀ Poprzednia"),
+          h("span", { className: "counter" }, pageLabel(page, total, orientation)),
+          h("button", { onClick: () => {
+            flipDirRef.current = "next";
+            bookRef.current.pageFlip().flipNext();
+          } }, "Następna ▶")
+        ),
+        // "Zapisz" / "Otwórz" (działają też na okładkach).
+        h("div", { className: "file-row" },
+          h("div", {
+            className: "file-btn" + (hasFile && !dirty ? " disabled" : ""),
+            onMouseDown: (e) => e.preventDefault(),   // nie zabiera fokusu z tekstu
+            onClick: requestSave
+          }, "Zapisz"),
+          h("div", {
+            className: "file-btn",
+            onMouseDown: (e) => e.preventDefault(),
+            onClick: requestOpen
+          }, "Otwórz")
+        )
       ),
       h("div", {
         className: "dialog-overlay" + (dialogOpen ? " visible" : ""),
