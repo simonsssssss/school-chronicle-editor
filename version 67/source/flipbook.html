@@ -819,10 +819,9 @@
     color: #bbb;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.075);
   }
-  /* ---- Narzędzie "Wzory" ------------------------------------------------ */
   :root {
-    /* Kursor obrotu (okrągła strzałka). */
-    --rotate-cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 12a8 8 0 1 1-2.34-5.66L20 8M20 3v5h-5' stroke='white' stroke-width='5'/%3E%3Cpath d='M20 12a8 8 0 1 1-2.34-5.66L20 8M20 3v5h-5' stroke='%23000000' stroke-width='2'/%3E%3C/g%3E%3C/svg%3E") 12 12, pointer;
+    /* Kursor obrotu (okrągła strzałka), 16 x 16 px. */
+    --rotate-cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 12a8 8 0 1 1-2.34-5.66L20 8M20 3v5h-5' stroke='white' stroke-width='6'/%3E%3Cpath d='M20 12a8 8 0 1 1-2.34-5.66L20 8M20 3v5h-5' stroke='%23000000' stroke-width='2.6'/%3E%3C/g%3E%3C/svg%3E") 8 8, pointer;
   }
   /* Ukryte miejsce, w którym wzory są rysowane przy starcie. */
   #pattern-source {
@@ -942,7 +941,7 @@
   .ornament-rotate-btn {
     position: absolute;
     display: none;
-    width: 28px;
+    width: 22px;
     height: 20px;
     box-sizing: border-box;
     align-items: center;
@@ -977,6 +976,70 @@
     transform: translateY(-50%);
   }
   .hint-stack { max-height: calc(100% - 330px); }
+  /* Szerokość / wysokość / obrót zaznaczonego obrazu lub wzoru
+     (tryb przesuwania). Po kliknięciu można wpisać wartość. */
+  .dim-input {
+    position: absolute;
+    display: none;
+    height: 20px;
+    box-sizing: border-box;
+    padding: 0 2px;
+    font-family: inherit;
+    font-size: 11px;
+    text-align: center;
+    color: #333;
+    background: #fff;
+    border: 1px solid #999;
+    border-radius: 3px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    cursor: text;
+    z-index: 5;
+  }
+  .book-wrap.move-mode .dim-input { display: block; }
+  .dim-input:focus {
+    outline: none;
+    border-color: #0078d7;
+  }
+  /* Notki trochę ciaśniej, żeby dłuższe teksty mieściły się pod przyciskami. */
+  .move-hint { line-height: 1.4; }
+  /* Własne dymki przycisków odbicia i obrotu (dymki z atrybutu title
+     w WebView2 pokazują się dopiero przy drugim najechaniu myszką). */
+  .ornament-mirror:hover,
+  .ornament-rotate-btn:hover { z-index: 6; }
+  .ornament-mirror[data-tip]::after,
+  .ornament-rotate-btn[data-tip]::after {
+    content: attr(data-tip);
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    width: max-content;
+    padding: 4px 8px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: #333;
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.15s ease, visibility 0s linear 0.15s;
+    z-index: 20;
+  }
+  .ornament-mirror[data-tip]:hover::after,
+  .ornament-rotate-btn[data-tip]:hover::after {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.15s ease 0.5s, visibility 0s linear 0.5s;
+  }
+  .ornament-mirror[data-tip]:active::after,
+  .ornament-rotate-btn[data-tip]:active::after {
+    opacity: 0;
+    visibility: hidden;
+    transition: none;
+  }
 </style>
 </head>
 <body>
@@ -2261,7 +2324,66 @@
       }
     };
   }
+  const DIM_H = 20, DIM_GAP = 4;   // wysokość pól z wartościami, odstęp między nimi
+  const DIM_EDGE_GAP = 9;          // odstęp pól od krawędzi obrazu
 
+  // Szerokość pola dopasowana do jego tekstu (ta sama czcionka co w .dim-input):
+  // tekst + 2 px paddingu z każdej strony + ramka + odrobina zapasu.
+  const dimMeasure = document.createElement("canvas").getContext("2d");
+  function dimFieldWidth(text) {
+    dimMeasure.font = '11px "Segoe UI", sans-serif';
+    return Math.ceil(dimMeasure.measureText(text).width) + 10;
+  }
+
+  const clampTo = (v, max) => Math.min(Math.max(v, 0), Math.max(max, 0));
+
+  // Piksele strony -> jednostki strony (te same co rozmiar czcionki):
+  // strona ma REF_PAGE_W jednostek szerokości.
+  function formatUnits(px, pageW) {
+    return Math.round(px / pageW * REF_PAGE_W) + " j.";
+  }
+  // Stopnie -> "45°" (zawsze od 0 do 359).
+  function formatDeg(rot) {
+    return ((Math.round(rot || 0) % 360) + 360) % 360 + "°";
+  }
+  // Pierwsza liczba z wpisanego tekstu ("225 j.", "225", "12,5", "-45°"...).
+  function parseDimNumber(text) {
+    const m = /-?\d+(?:[.,]\d+)?/.exec(text || "");
+    return m ? parseFloat(m[0].replace(",", ".")) : NaN;
+  }
+
+  // Pola z szerokością i wysokością obrazu o lewym górnym rogu (L, T)
+  // i rozmiarze W x H (piksele strony): szerokość nad środkiem górnej
+  // krawędzi, wysokość obok środka lewej krawędzi. Gdy brak miejsca:
+  // szerokość tuż pod górną krawędzią, wysokość przy prawej krawędzi.
+  function imageDimsLayout(L, T, W, H, pageW, pageH) {
+    const wText = formatUnits(W, pageW), hText = formatUnits(H, pageW);
+    const wW = dimFieldWidth(wText), hW = dimFieldWidth(hText);
+
+    let wTop = T - DIM_EDGE_GAP - DIM_H;
+    if (wTop < 0) wTop = T + DIM_EDGE_GAP;
+    const w = { left: clampTo(L + W / 2 - wW / 2, pageW - wW), top: clampTo(wTop, pageH - DIM_H), width: wW };
+
+    let hLeft = L - DIM_EDGE_GAP - hW;
+    if (hLeft < 0) hLeft = L + W + DIM_EDGE_GAP;
+    if (hLeft + hW > pageW) hLeft = L + DIM_EDGE_GAP;
+    const hh = { left: clampTo(hLeft, pageW - hW), top: clampTo(T + H / 2 - DIM_H / 2, pageH - DIM_H), width: hW };
+
+    return { w, h: hh, wText, hText };
+  }
+
+  // Przesuwa pole z wartością, dopasowuje jego szerokość i wpisuje do niego
+  // tekst (podczas przeciągania). Pole, w którym właśnie się pisze,
+  // zachowuje swój tekst.
+  function setDimInput(el, pos, text) {
+    if (!el) return;
+    if (pos) {
+      el.style.left = pos.left + "px";
+      el.style.top = pos.top + "px";
+      if (pos.width) el.style.width = pos.width + "px";
+    }
+    if (document.activeElement !== el) el.value = text;
+  }
   // Move / resize a picture and its handles directly on screen (used while
   // dragging, so the whole book doesn't have to be re-rendered on every
   // mouse move). Values are page pixels.
@@ -2302,6 +2424,13 @@
         box.dataset.anchorY = cp.y / ph;
         keepAnchored(box);
       });
+    }
+    // Szerokość i wysokość przy zaznaczonym obrazie: na żywo podczas zmiany.
+    const dW = pageEl.offsetWidth, dH = pageEl.offsetHeight;
+    if (dW && dH) {
+      const d = imageDimsLayout(L, T, W, H, dW, dH);
+      setDimInput(pageEl.querySelector(`.dim-input[data-image-id="${id}"][data-dim="w"]`), d.w, d.wText);
+      setDimInput(pageEl.querySelector(`.dim-input[data-image-id="${id}"][data-dim="h"]`), d.h, d.hText);
     }
   }
 
@@ -2354,7 +2483,8 @@
   const ORNAMENT_HANDLE = 11;      // strzałki rozmiaru (jak przy obrazach)
   const MIN_ORNAMENT_SIDE = 16;    // najkrótszy bok wzoru przy zmniejszaniu
   const ROT_SNAP_DEG = 4;          // blisko 0/90/180/270°: wzór "przyskakuje"
-  const ORN_BTN_W = 28, ORN_BTN_H = 20, ORN_BTN_GAP = 6;   // przyciski obrotu i odbicia
+  const ORN_BTN_W = 22, ORN_BTN_H = 20, ORN_BTN_GAP = 6;   // przycisk obrotu (i wysokość obu)
+  const MIRROR_BTN_W = 22;                                  // przycisk odbicia (węższy)
   const CORNERS = ["nw", "ne", "sw", "se"];
   const CORNER_ANGLE = { se: 45, sw: 135, nw: 225, ne: 315 };
   const RESIZE_CURSORS = ["ew-resize", "nwse-resize", "ns-resize", "nesw-resize"];
@@ -2413,12 +2543,33 @@
     // tuż pod strzałką rozmiaru w tym rogu.
     const right = g.cx + g.ex, top = g.cy - g.ey;
     let mLeft = right + ORN_BTN_GAP, mTop = top;
-    if (mLeft + ORN_BTN_W > pageW) {
-      mLeft = right - ORN_BTN_W;
+    if (mLeft + MIRROR_BTN_W > pageW) {
+      mLeft = right - MIRROR_BTN_W;
       mTop = top - ORN_BTN_GAP - ORN_BTN_H;
       if (mTop < 0) mTop = top + ORNAMENT_HANDLE + 4;
     }
-    const mirror = { left: fitX(mLeft), top: fitY(mTop) };
+    const mirror = { left: clampTo(mLeft, pageW - MIRROR_BTN_W), top: fitY(mTop) };
+
+    // Szerokość, wysokość i obrót w jednym wierszu pod przyciskiem obrotu
+    // (nad nim, gdy przycisk stoi nad wzorem; obok niego, gdy nigdzie
+    // indziej nie ma miejsca). Szerokość i wysokość to własne wymiary
+    // wzoru, niezależne od obrotu.
+    const wText = "sz: " + formatUnits(g.W, pageW);
+    const hText = "w: " + formatUnits(g.H, pageW);
+    const rotText = formatDeg(o.rot);
+    const wW = dimFieldWidth(wText), hW = dimFieldWidth(hText), rW = dimFieldWidth(rotText);
+    const rowW = wW + hW + rW + 2 * DIM_GAP;
+
+    const rotateAbove = rotate.top + ORN_BTN_H / 2 < g.cy;
+    let rowLeft = rotate.left + ORN_BTN_W / 2 - rowW / 2;
+    let rowTop = rotateAbove ? rotate.top - DIM_GAP - DIM_H : rotate.top + ORN_BTN_H + DIM_GAP;
+    if (rowTop < 0 || rowTop + DIM_H > pageH) {
+      rowTop = rotate.top + (ORN_BTN_H - DIM_H) / 2;
+      rowLeft = rotate.left + ORN_BTN_W + DIM_GAP;
+      if (rowLeft + rowW > pageW) rowLeft = rotate.left - DIM_GAP - rowW;
+    }
+    rowLeft = clampTo(rowLeft, pageW - rowW);
+    rowTop = clampTo(rowTop, pageH - DIM_H);
 
     return {
       box: {
@@ -2428,7 +2579,15 @@
       flip: o.flip ? "scaleX(-1)" : "",
       handles,
       rotate,
-      mirror
+      mirror,
+      dims: {
+        w:   { left: rowLeft,                         top: rowTop, width: wW },
+        h:   { left: rowLeft + wW + DIM_GAP,          top: rowTop, width: hW },
+        rot: { left: rowLeft + wW + hW + 2 * DIM_GAP, top: rowTop, width: rW },
+        wText,
+        hText,
+        rotText
+      }
     };
   }
 
@@ -2455,6 +2614,11 @@
     }
     applyLayoutStyle(pageEl.querySelector(`.ornament-rotate-btn[data-ornament-id="${o.id}"]`), L.rotate);
     applyLayoutStyle(pageEl.querySelector(`.ornament-mirror[data-ornament-id="${o.id}"]`), L.mirror);
+    // Szerokość, wysokość i obrót zaznaczonego wzoru: na żywo.
+    const q = (dim) => pageEl.querySelector(`.dim-input[data-ornament-id="${o.id}"][data-dim="${dim}"]`);
+    setDimInput(q("w"), L.dims.w, L.dims.wText);
+    setDimInput(q("h"), L.dims.h, L.dims.hText);
+    setDimInput(q("rot"), L.dims.rot, L.dims.rotText);
   }
 
   // Wzór (i jego przycisk) nad wszystkim innym na stronie podczas przeciągania.
@@ -2498,7 +2662,56 @@
       requestAnimationFrame(recheck);
     }, 0);
   }
-
+  // Pole z szerokością / wysokością / obrotem. Wygląda jak etykieta,
+  // a po kliknięciu można wpisać wartość (Enter: zatwierdź, Esc: anuluj).
+  // Szerokość pola dopasowana do tekstu (pos.width).
+  function DimInput({ kind, id, dim, pos, text, title, onCommit }) {
+    return h("input", {
+      type: "text",
+      className: "dim-input",
+      "data-dim-kind": kind,
+      [kind === "image" ? "data-image-id" : "data-ornament-id"]: id,
+      "data-dim": dim,
+      title,
+      spellCheck: false,
+      autoComplete: "off",
+      style: {
+        left: pos.left + "px",
+        top: pos.top + "px",
+        width: pos.width + "px"
+      },
+      ref: (el) => {
+        if (!el) return;
+        // Aktualna wartość, ale nie w trakcie pisania.
+        if (document.activeElement !== el) el.value = text;
+        if (!el.dataset.listenersAttached) {
+          el.dataset.listenersAttached = "1";
+          // Kliknięcia i ruchy myszki nie docierają do książki (bez przewracania).
+          const stop = (e) => e.stopPropagation();
+          el.addEventListener("mousedown", stop);
+          el.addEventListener("touchstart", stop);
+          el.addEventListener("mousemove", stop);
+        }
+      },
+      onFocus: (e) => {
+        const el = e.target;
+        el.dataset.startValue = el.value;
+        setTimeout(() => { if (document.activeElement === el) el.select(); }, 0);
+      },
+      onBlur: (e) => onCommit(e.target),
+      onKeyDown: (e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.target.blur();                 // zatwierdza (onBlur)
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          if (e.target.dataset.startValue !== undefined) e.target.value = e.target.dataset.startValue;
+          e.target.blur();
+        }
+      }
+    });
+  }
   // A single page/cover surface. Renders whatever text boxes belong to it.
   // data-page-key lets the top-level pointerdown interceptor (see App)
   // figure out which page a click landed on without needing a React
@@ -2567,6 +2780,20 @@
           }
         }));
       }), 
+      // Szerokość i wysokość zaznaczonego obrazu (można je wpisać).
+      props.images.filter((img) => img.id === props.selectedImageId).flatMap((img) => {
+        const d = imageDimsLayout(
+          img.left * props.pageW, img.top * props.pageH,
+          img.w * props.pageW,    img.h * props.pageH,
+          props.pageW, props.pageH
+        );
+        return [
+          h(DimInput, { key: "dw" + img.id, kind: "image", id: img.id, dim: "w", pos: d.w,
+            text: d.wText, title: "Szerokość", onCommit: props.onDimCommit }),
+          h(DimInput, { key: "dh" + img.id, kind: "image", id: img.id, dim: "h", pos: d.h,
+            text: d.hText, title: "Wysokość", onCommit: props.onDimCommit })
+        ];
+      }),
       // Wzory: nad obrazami, pod polami tekstowymi. Łapią kliknięcia tylko
       // w trybie przesuwania (patrz CSS).
       (props.ornaments || []).flatMap((o) => {
@@ -2599,7 +2826,7 @@
             key: "orr" + o.id,
             className: "ornament-rotate-btn",
             "data-ornament-id": o.id,
-            title: "Obrót",
+            "data-tip": "Obrót",
             style: L.rotate
           }, h(RotateIcon)),
           // Lustrzane odbicie: przy prawym górnym rogu.
@@ -2607,9 +2834,19 @@
             key: "orm" + o.id,
             className: "ornament-mirror",
             "data-ornament-id": o.id,
-            title: "Lustrzane odbicie",
+            "data-tip": "Lustrzane odbicie",
             style: L.mirror
-          }, h(MirrorIcon))
+          }, h(MirrorIcon)),
+          // Szerokość, wysokość i obrót zaznaczonego wzoru, w jednym wierszu
+          // (można je wpisać).
+          ...(props.selectedOrnamentId === o.id ? [
+            h(DimInput, { key: "odw" + o.id, kind: "ornament", id: o.id, dim: "w", pos: L.dims.w,
+              text: L.dims.wText, title: "Szerokość", onCommit: props.onDimCommit }),
+            h(DimInput, { key: "odh" + o.id, kind: "ornament", id: o.id, dim: "h", pos: L.dims.h,
+              text: L.dims.hText, title: "Wysokość", onCommit: props.onDimCommit }),
+            h(DimInput, { key: "odr" + o.id, kind: "ornament", id: o.id, dim: "rot", pos: L.dims.rot,
+              text: L.dims.rotText, title: "Obrót", onCommit: props.onDimCommit })
+          ] : [])
         ];
       }),
       props.boxes.map((box) => {
@@ -3203,22 +3440,25 @@
       h("path", { d: "M9 22 L15 22" })                           // 2. linia podpisu
     );
   }
-  // Ornament z czterech płatków: "wzory".
+
+  // Gałązka z trzema listkami: "wzory".
   function PatternIcon() {
     return h("svg", { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
-      h("path", { d: "M12 12C9.5 9.5 9.5 4.5 12 3C14.5 4.5 14.5 9.5 12 12" }),
-      h("path", { d: "M12 12C14.5 9.5 19.5 9.5 21 12C19.5 14.5 14.5 14.5 12 12" }),
-      h("path", { d: "M12 12C14.5 14.5 14.5 19.5 12 21C9.5 19.5 9.5 14.5 12 12" }),
-      h("path", { d: "M12 12C9.5 14.5 4.5 14.5 3 12C4.5 9.5 9.5 9.5 12 12" })
+      h("path", { d: "M12 22V10" }),                                    // łodyga
+      h("path", { d: "M12 10C9.8 8 9.8 4.8 12 2C14.2 4.8 14.2 8 12 10Z" }),   // listek u góry
+      h("path", { d: "M12 16C10 12.6 7.2 10.8 3.8 10.8C4.8 14 7.8 16 12 16Z" }), // listek po lewej
+      h("path", { d: "M12 16C14 12.6 16.8 10.8 20.2 10.8C19.2 14 16.2 16 12 16Z" }) // listek po prawej
     );
   }
 
-  // Dwa trójkąty po obu stronach osi: "lustrzane odbicie".
+  // Lustrzane odbicie: dwustronna strzałka nad osią i dwa trójkąty
+  // (pełny i pusty) po obu jej stronach.
   function MirrorIcon() {
-    return h("svg", { width: 16, height: 14, viewBox: "0 0 24 22", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
-      h("path", { d: "M12 1V21", strokeDasharray: "2 3" }),
-      h("path", { d: "M9 5L3 17H9Z", fill: "currentColor" }),
-      h("path", { d: "M15 5L21 17H15Z" })
+    return h("svg", { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" },
+      h("path", { d: "M12 8V22", strokeWidth: 1.4 }),                          // oś
+      h("path", { d: "M9.5 10L3 20H9.5Z", fill: "currentColor" }),             // lewa połowa
+      h("path", { d: "M14.5 10L21 20H14.5Z" }),                                // prawa połowa (odbicie)
+      h("path", { d: "M6 4H18M6 4L8.5 1.8M6 4L8.5 6.2M18 4L15.5 1.8M18 4L15.5 6.2" })   // strzałka
     );
   }
   
@@ -5129,7 +5369,7 @@
       // Blur whatever's currently focused so its latest content is
       // committed to the DOM before pruneAllEmpty reads it below.
       const current = document.activeElement;
-      if (current && current.isContentEditable) current.blur();
+      if (current && (current.isContentEditable || current.classList.contains("dim-input"))) current.blur();
       toolRef.current = resolved;
       setTool(resolved);
       selectBox(null);
@@ -5463,10 +5703,11 @@
     const anyDialogOpen = () => dialogOpenRef.current || imageDialogOpenRef.current
       || openDialogOpenRef.current || closeDialogOpenRef.current;
 
-    // "Zapisz" / Ctrl+S. Jeszcze nie plik: main.cpp zapyta o miejsce i nazwę.
-    // Już plik: zapisuje zmiany, ale tylko jeśli jakieś są.
     const requestSave = () => {
       if (fileBusyRef.current || anyDialogOpen()) return;
+      // Najpierw zatwierdź wymiar / obrót, który jest właśnie wpisywany.
+      const ae = document.activeElement;
+      if (ae && ae.classList && ae.classList.contains("dim-input")) ae.blur();
       const doc = buildDoc();
       const snap = docSnapshot(doc);
       if (hasFileRef.current && snap === baselineRef.current) return;   // nic do zapisania
@@ -6426,7 +6667,145 @@
       }]);
       selectBox(id); // repeated Ctrl+V continues from the fresh copy
     };
+    // ---- Wymiary i obrót wpisane ręcznie (tryb przesuwania) ---------------
 
+    // Obraz o wpisanej szerokości / wysokości (jednostki strony). Proporcje
+    // zostają, środek obrazu zostaje w miejscu, o ile się da; obraz i jego
+    // podpisy zawsze mieszczą się na stronie.
+    const resizeImageTo = (pageEl, id, dim, units) => {
+      const img = imagesRef.current.find((im) => im.id === id);
+      if (!img || !(units > 0)) return false;
+      const pageW = pageEl.offsetWidth, pageH = pageEl.offsetHeight;
+      const innerW = pageEl.clientWidth, innerH = pageEl.clientHeight;
+      const w0 = img.w * pageW, h0 = img.h * pageH, ratio = w0 / h0;
+
+      const px = units / REF_PAGE_W * pageW;   // wpisana wartość jest w jednostkach strony
+      let W = dim === "w" ? px : px * ratio;
+
+      const below = captionRoomBelow(pageEl, id);
+      const xr = captionXRange(pageEl, id);
+      const maxW = Math.max(Math.min(innerW, (innerH - below) * ratio, 2 * xr.max, 2 * (innerW - xr.min)), 1);
+      const minW = Math.min(ratio >= 1 ? MIN_IMAGE_SIDE * ratio : MIN_IMAGE_SIDE, w0, maxW);
+      W = Math.min(Math.max(W, minW), maxW);
+      const H = W / ratio;
+
+      const cx = (img.left + img.w / 2) * pageW, cy = (img.top + img.h / 2) * pageH;
+      const loL = Math.max(0, xr.min - W / 2), hiL = Math.min(innerW - W, xr.max - W / 2);
+      const Lpx = loL <= hiL ? Math.min(Math.max(cx - W / 2, loL), hiL) : clampTo(cx - W / 2, innerW - W);
+      const Tpx = clampTo(cy - H / 2, innerH - below - H);
+
+      layoutImageDom(pageEl, id, Lpx, Tpx, W, H);   // podpisy przesuwają się od razu
+      const next = imagesRef.current.map((im) => im.id === id
+        ? { ...im, left: Lpx / pageW, top: Tpx / pageH, w: W / pageW, h: H / pageH } : im);
+      imagesRef.current = next;
+      setImages(next);
+      commitImageFollowers(id);
+      return true;
+    };
+
+    // Wzór o wpisanej szerokości / wysokości (jednostki strony). Proporcje
+    // i obrót zostają, środek przesuwa się tylko tyle, żeby wzór był cały
+    // na stronie.
+    const resizeOrnamentTo = (pageEl, id, dim, units) => {
+      const o = ornamentsRef.current.find((x) => x.id === id);
+      const pat = o && PATTERN_MAP.get(o.pattern);
+      if (!pat || !(units > 0)) return false;
+      const pageW = pageEl.offsetWidth, pageH = pageEl.offsetHeight;
+      const innerW = pageEl.clientWidth, innerH = pageEl.clientHeight;
+      const ratio = pat.ratio;
+      const a = (o.rot || 0) * Math.PI / 180;
+      const cos = Math.abs(Math.cos(a)), sin = Math.abs(Math.sin(a));
+
+      const px = units / REF_PAGE_W * pageW;   // wpisana wartość jest w jednostkach strony
+      let W = dim === "w" ? px : px / ratio;   // "sz:" i "w:" to własne wymiary wzoru
+      const maxW = Math.min(innerW / (cos + ratio * sin), innerH / (sin + ratio * cos));
+      const minW = Math.min(ratio >= 1 ? MIN_ORNAMENT_SIDE : MIN_ORNAMENT_SIDE / ratio, o.w * pageW, maxW);
+      W = Math.min(Math.max(W, minW), maxW);
+      const H = W * ratio;
+      const ex = (W * cos + H * sin) / 2, ey = (W * sin + H * cos) / 2;
+
+      const next = ornamentsRef.current.map((x) => x.id === id ? {
+        ...x,
+        x: clampCenter(o.x * pageW, ex, innerW) / pageW,
+        y: clampCenter(o.y * pageH, ey, innerH) / pageH,
+        w: W / pageW
+      } : x);
+      ornamentsRef.current = next;
+      setOrnaments(next);
+      return true;
+    };
+
+    // Wzór obrócony o wpisany kąt. Jeśli tak obrócony nie zmieści się na
+    // stronie, nic się nie zmienia.
+    const rotateOrnamentTo = (pageEl, id, deg) => {
+      const o = ornamentsRef.current.find((x) => x.id === id);
+      const pat = o && PATTERN_MAP.get(o.pattern);
+      if (!pat || !isFinite(deg)) return false;
+      const pageW = pageEl.offsetWidth, pageH = pageEl.offsetHeight;
+      const innerW = pageEl.clientWidth, innerH = pageEl.clientHeight;
+      const rot = ((deg % 360) + 360) % 360;
+      const W = o.w * pageW, H = W * pat.ratio;
+      const a = rot * Math.PI / 180;
+      const cos = Math.abs(Math.cos(a)), sin = Math.abs(Math.sin(a));
+      const ex = (W * cos + H * sin) / 2, ey = (W * sin + H * cos) / 2;
+      if (2 * ex > innerW + 0.5 || 2 * ey > innerH + 0.5) {
+        showToast("Tak obrócony wzór nie zmieści się na\u00A0stronie");
+        return false;
+      }
+      const next = ornamentsRef.current.map((x) => x.id === id ? {
+        ...x,
+        x: clampCenter(o.x * pageW, ex, innerW) / pageW,
+        y: clampCenter(o.y * pageH, ey, innerH) / pageH,
+        rot
+      } : x);
+      ornamentsRef.current = next;
+      setOrnaments(next);
+      return true;
+    };
+
+    // Pole z wartością straciło fokus (Enter, kliknięcie obok...): zastosuj
+    // wpisaną wartość. Niepoprawna wartość: wraca poprzednia.
+    const commitDimInput = (input) => {
+      const start = input.dataset.startValue;
+      delete input.dataset.startValue;
+      if (start === undefined || input.value === start) return;
+
+      const pageEl = input.parentElement;
+      const id = Number(input.dataset.imageId || input.dataset.ornamentId);
+      const dim = input.dataset.dim;
+      const num = parseDimNumber(input.value);
+      let ok = false;
+      if (pageEl && pageEl.offsetWidth && isFinite(num)) {
+        if (input.dataset.dimKind === "image") ok = resizeImageTo(pageEl, id, dim, num);
+        else if (dim === "rot") ok = rotateOrnamentTo(pageEl, id, num);
+        else ok = resizeOrnamentTo(pageEl, id, dim, num);
+      }
+      if (!ok) input.value = start;
+    };
+
+    // Delete w trybie przesuwania: usuwa zaznaczony tekst, obraz lub wzór.
+    // (Używa tylko refów i setterów, bo wywołuje ją listener podpięty raz.)
+    const deleteSelected = () => {
+      const ornId = selectedOrnamentIdRef.current;
+      const imgId = selectedImageIdRef.current;
+      const boxId = selectedIdRef.current;
+      if (ornId !== null) {
+        setOrnaments((prev) => prev.filter((o) => o.id !== ornId));
+      } else if (imgId !== null) {
+        setImages((prev) => prev.filter((im) => im.id !== imgId));
+        // Podpisy przyklejone do usuniętego obrazu zostają jako zwykłe pola.
+        setBoxes((prev) => prev.map((b) => {
+          if (!b.anchor || b.anchor.imageId !== imgId) return b;
+          return { ...b, ...livePos(b, boxRefs.current[b.id]), anchor: null };
+        }));
+      } else if (boxId !== null) {
+        setBoxes((prev) => prev.filter((b) => b.id !== boxId));
+        delete boxRefs.current[boxId];
+      } else {
+        return;
+      }
+      selectBox(null);
+    };
     // Keyboard shortcuts and cursor tracking. These are attached once; the
     // functions they call only use refs and state setters, so the first
     // render's closures stay valid.
@@ -6444,6 +6823,15 @@
         if (dialogOpenRef.current || imageDialogOpenRef.current
             || openDialogOpenRef.current || closeDialogOpenRef.current) return;
         if (toolRef.current !== TOOL_MOVE) return;
+        // Pisanie w polu (np. wymiar obrazu): skróty trybu przesuwania nie działają.
+        const ae = document.activeElement;
+        if (ae && (ae.tagName === "INPUT" || ae.tagName === "SELECT" || ae.tagName === "TEXTAREA")) return;
+        // Delete: usuwa zaznaczony tekst, obraz lub wzór.
+        if (e.key === "Delete" && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
+          e.preventDefault();
+          deleteSelected();
+          return;
+        }
         if (!e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
         if (e.code === "KeyC") {
           e.preventDefault();
@@ -6584,6 +6972,8 @@
         if (e.target.closest(".fontsize-spin")) return;
         if (e.target.closest(".format-btn")) return;
         if (e.target.closest(".font-family-control")) return;
+        // Pola z wymiarami / obrotem: zwykłe wpisywanie tekstu.
+        if (e.target.closest(".dim-input")) return;
         // Gaps between the toolbar controls: do nothing, and keep the
         // focus and selection in the text (and away from the flipbook).
         if (e.target.closest(".toolbar-strip")) {
@@ -6604,6 +6994,9 @@
 
         if (toolRef.current === TOOL_MOVE) {
           e.preventDefault();
+          // Kliknięcie obok pola z wartością: najpierw zatwierdź wpisaną wartość.
+          const ae = document.activeElement;
+          if (ae && ae.classList && ae.classList.contains("dim-input")) ae.blur();
           // Strzałka w rogu wzoru: zmiana rozmiaru. Sprawdzane przed obrazami,
           // bo te strzałki mają klasę image-handle.
           const ornHandle = e.target.closest(".page-ornament [data-handle]");
@@ -6710,7 +7103,7 @@
         if (e.target.closest(".pattern-panel")) return;
         if (e.target.closest(".fontsize-control")) return;
         if (e.target.closest(".font-family-control")) return;
-
+        if (e.target.closest(".dim-input")) return;
         // Still hide the move from the flipbook (no hover-corner animation),
         // but don't block drag-selection while in text mode.
         if (toolRef.current !== TOOL_TEXT) e.preventDefault();
@@ -6809,6 +7202,7 @@
       openColorPicker,
       alignDots: alignOn ? alignPoints(alignLayout) : null,
       onBoxPos: commitBoxPos,
+      onDimCommit: commitDimInput,
 	  captionOn
     });
 
@@ -6949,7 +7343,18 @@
               ".",
               h("br"),
               h("br"),
-              "Aby zmienić rozmiar obrazu lub wzoru, przeciągnij jeden z\u00A0jego rogów."
+              "Aby zmienić rozmiar obrazu lub wzoru, przeciągnij jeden z\u00A0jego rogów.",
+			  h("br"),
+              h("br"),
+              "Aby usunąć tekst, obraz lub wzór, kliknij go, a\u00A0następnie naciśnij ",
+              h("kbd", null, "Delete"),
+              ".",
+			  h("br"),
+              h("br"),
+              "Wymiary obrazów i\u00A0wzorów są podane w\u00A0jednostkach strony (j.), " +
+              "tych samych co rozmiar czcionki. Strona ma " + REF_PAGE_W +
+              " jednostek szerokości i\u00A0" + Math.round(REF_PAGE_W * PAGE_RATIO) +
+              " jednostek wysokości."
             ),
             pendingImage && h("div", { className: "move-hint" },
               pendingImage.loading
