@@ -989,6 +989,21 @@
     visibility: visible;
     transition: opacity 0.15s ease, visibility 0s linear 0s;
   }
+  /* Przewracanie okładki (strona "twarda", obrót 3D): elementy z własnym
+     transform (wzory, pasek narzędzi pola) muszą same chować swoją
+     odwrotną stronę, bo nie dziedziczą tego od strony. Inaczej
+     prześwitują przez okładkę. */
+  .page-ornament,
+  .page-ornament .pattern-svg,
+  .textbox-wrapper > .fontsize-control,
+  .textbox-wrapper > .fontsize-spin,
+  .textbox-wrapper > .format-btn,
+  .textbox-wrapper > .font-family-control,
+  .textbox-wrapper > .toolbar-strip,
+  .cover-title {
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+  }
 </style>
 </head>
 <body>
