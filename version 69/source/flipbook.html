@@ -1004,9 +1004,8 @@
     backface-visibility: hidden;
     -webkit-backface-visibility: hidden;
   }
-  /* ---- Poprawki ---- */
-  /* Notki bez ograniczenia wysokości: te, które nie mieszczą się pod
-     przyciskami narzędzi, chowa skrypt (patrz "Notki" w App). */
+  /* Notki zawsze widoczne w całości. Gdy brakuje miejsca, zachodzą na
+     przyciski narzędzi (nie łapią kliknięć, więc przyciski działają). */
   .hint-stack { max-height: none; overflow: visible; }
   /* Edytowane pole tekstowe (z paskiem narzędzi) zawsze na wierzchu. */
   .textbox-wrapper:focus-within { z-index: 800000 !important; }
@@ -2581,7 +2580,7 @@
   const PATTERN_MAP = new Map(PATTERNS.map((p) => [p.key, p]));
 
   // Nowy wzór: jego dłuższy bok to taka część szerokości strony.
-  const DEFAULT_PATTERN_PART = 0.4;
+  const DEFAULT_PATTERN_PART = 0.25;
   const MAX_PATTERN_PART = 0.5;
   const ORNAMENT_HANDLE = 11;      // strzałki rozmiaru (jak przy obrazach)
   const MIN_ORNAMENT_SIDE = 16;    // najkrótszy bok wzoru przy zmniejszaniu
@@ -7287,19 +7286,6 @@
       savedRangeRef.current = null;
       setFragmentHighlight(null);
     }, [page]);
-    // ---- Notki ----
-    // Notka, która nie mieści się w całości pod przyciskami narzędzi, jest chowana.
-    const toggleRowRef = useRef(null);
-    const hintStackRef = useRef(null);
-    React.useLayoutEffect(() => {
-      const stack = hintStackRef.current, row = toggleRowRef.current;
-      if (!stack || !row) return;
-      const hints = Array.from(stack.children);
-      hints.forEach((el) => { el.style.display = ""; });
-      const limit = row.getBoundingClientRect().bottom + 10;
-      const tops = hints.map((el) => el.getBoundingClientRect().top);
-      hints.forEach((el, i) => { if (tops[i] < limit) el.style.display = "none"; });
-    });
     const boxesFor = (pageKey) => boxes.filter((b) => b.page === pageKey);
     const imagesFor = (pageKey) => images.filter((im) => im.page === pageKey);
     const ornamentsFor = (pageKey) => ornaments.filter((o) => o.page === pageKey);
@@ -7392,7 +7378,7 @@
             ...pageKeys.map((k) => h(Surface, { key: k, ...surfaceProps(k, false) })),
             h(Surface, { key: "c2", ...surfaceProps("c2", true) })
           ),
-          h("div", { className: "toggle-row", ref: toggleRowRef },
+          h("div", { className: "toggle-row" },
             h("div", {
               className: "toggle-btn" + (tool === TOOL_TEXT ? " active" : "") + (coverLock ? " disabled" : ""),
               "data-tip": "Dodawanie tekstu" + coverNote,
@@ -7449,7 +7435,7 @@
           ),
           // Lista wzorów na lewo od książki (tylko przy włączonym narzędziu).
           tool === TOOL_PATTERN && h(PatternPanel, { selected: selectedPattern, onSelect: selectPattern }),
-          !hideHints && h("div", { className: "hint-stack", ref: hintStackRef },
+          !hideHints && h("div", { className: "hint-stack" },
             alignOn && h("div", { className: "move-hint" },
               "Aby wyrównać treść na stronie, przeciągnij ją tak, żeby jej środek znalazł się blisko kropki.",
               h("br"),
@@ -7469,18 +7455,9 @@
               ".",
               h("br"),
               h("br"),
-              "Aby zmienić rozmiar obrazu lub wzoru, przeciągnij jeden z\u00A0jego rogów.",
-			  h("br"),
-              h("br"),
               "Aby usunąć tekst, obraz lub wzór, kliknij go, a\u00A0następnie naciśnij ",
               h("kbd", null, "Delete"),
-              ".",
-			  h("br"),
-              h("br"),
-              "Wymiary obrazów i\u00A0wzorów są podane w\u00A0jednostkach strony (j.), " +
-              "tych samych co rozmiar czcionki. Strona ma " + REF_PAGE_W +
-              " jednostek szerokości i\u00A0" + Math.round(REF_PAGE_W * PAGE_RATIO) +
-              " jednostek wysokości."
+              "."
             ),
             pendingImage && h("div", { className: "move-hint" },
               pendingImage.loading
