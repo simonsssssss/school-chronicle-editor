@@ -1,3 +1,11 @@
+/*
+
+windres app.rc -O coff -o app_res.o
+
+g++ main.cpp app_res.o -o app.exe -municode -mwindows -O2 -s -static -static-libgcc -static-libstdc++ WebView2Loader.dll.lib -lole32 -lshell32 -luser32 -lgdi32 -luuid
+
+*/
+
 #define WINVER 0x0A00
 #define _WIN32_WINNT 0x0A00
 

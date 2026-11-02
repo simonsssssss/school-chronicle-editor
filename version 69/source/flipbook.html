@@ -412,9 +412,8 @@
   }
   .toggle-btn.active svg { stroke: #fff; }
   .toggle-btn svg { stroke: #444; }
-  /* Zablokowany przycisk: jaśniejsze kolory zamiast opacity, bo opacity
-     przyciemniłoby też jego podpowiedź (::after). Kolory odpowiadają
-     dawnemu wyglądowi z opacity 0.5 na białym tle. */
+  /* Zablokowany przycisk: jaśniejsze kolory (odpowiadają dawnemu
+     wyglądowi z opacity 0.5 na białym tle). */
   .toggle-btn.disabled {
     cursor: default;
     background: #fafafa;
@@ -746,44 +745,6 @@
     border-color: #0078d7;
     color: #fff;
   }
-  /* Własne podpowiedzi przycisków narzędzi (zamiast atrybutu title, którego
-     dymki w WebView2 pokazują się dopiero przy drugim najechaniu myszką).
-     Pojawiają się pod przyciskiem po pół sekundy, jak zwykłe dymki. */
-  .toggle-btn { position: relative; }
-  .toggle-btn[data-tip]::after {
-    content: attr(data-tip);
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;                /* rośnie w lewo, więc nigdy nie wyjdzie za prawą krawędź okna */
-    width: max-content;
-    max-width: 260px;
-    padding: 4px 8px;
-    font-size: 12px;
-    line-height: 1.4;
-    color: #333;
-    background: #fff;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
-    white-space: normal;
-    text-align: left;
-    pointer-events: none;    /* dymek nigdy nie łapie myszki */
-    opacity: 0;
-    visibility: hidden;
-    transition: opacity 0.15s ease, visibility 0s linear 0.15s;
-    z-index: 20;
-  }
-  .toggle-btn[data-tip]:hover::after {
-    opacity: 1;
-    visibility: visible;
-    transition: opacity 0.15s ease 0.5s, visibility 0s linear 0.5s;
-  }
-  /* Kliknięcie chowa dymek od razu, tak jak przy zwykłych dymkach. */
-  .toggle-btn[data-tip]:active::after {
-    opacity: 0;
-    visibility: hidden;
-    transition: none;
-  }
   /* "Zapisz" / "Otwórz": prawa kolumna wiersza pod książką, przy prawej
      krawędzi książki, na tej samej wysokości co przyciski przewracania. */
   .file-row {
@@ -969,12 +930,6 @@
   /* Przyciski narzędzi w jednej kolumnie przy prawej krawędzi książki
      (zawsze mieszczą się obok niej, niezależnie od szerokości ekranu). */
   .toggle-row { flex-direction: column; }
-  /* Dymek przycisku: na lewo od przycisku, żeby nie zasłaniał tych niżej. */
-  .toggle-btn[data-tip]::after {
-    top: 50%;
-    right: calc(100% + 6px);
-    transform: translateY(-50%);
-  }
   .hint-stack { max-height: calc(100% - 330px); }
   /* Szerokość / wysokość / obrót zaznaczonego obrazu lub wzoru
      (tryb przesuwania). Po kliknięciu można wpisać wartość. */
@@ -1002,18 +957,17 @@
   }
   /* Notki trochę ciaśniej, żeby dłuższe teksty mieściły się pod przyciskami. */
   .move-hint { line-height: 1.4; }
-  /* Własne dymki przycisków odbicia i obrotu (dymki z atrybutu title
-     w WebView2 pokazują się dopiero przy drugim najechaniu myszką). */
-  .ornament-mirror:hover,
-  .ornament-rotate-btn:hover { z-index: 6; }
-  .ornament-mirror[data-tip]::after,
-  .ornament-rotate-btn[data-tip]::after {
-    content: attr(data-tip);
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
+  /* Jedyny tooltip w programie (wygląd jak dawne dymki przycisków narzędzi).
+     Pokazuje go skrypt "Podpowiedzi" nad elementami z atrybutem data-tip. */
+  .app-tooltip {
+    position: fixed;
+    left: 0;
+    top: 0;
     width: max-content;
+    max-width: 260px;
+    box-sizing: border-box;
     padding: 4px 8px;
+    font-family: "Segoe UI", sans-serif;
     font-size: 12px;
     line-height: 1.4;
     color: #333;
@@ -1021,25 +975,47 @@
     border: 1px solid #ccc;
     border-radius: 4px;
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
-    white-space: nowrap;
-    pointer-events: none;
+    white-space: normal;
+    text-align: left;
+    pointer-events: none;    /* tooltip nigdy nie łapie myszki */
+    user-select: none;
     opacity: 0;
     visibility: hidden;
     transition: opacity 0.15s ease, visibility 0s linear 0.15s;
-    z-index: 20;
+    z-index: 100003;
   }
-  .ornament-mirror[data-tip]:hover::after,
-  .ornament-rotate-btn[data-tip]:hover::after {
+  .app-tooltip.visible {
     opacity: 1;
     visibility: visible;
-    transition: opacity 0.15s ease 0.5s, visibility 0s linear 0.5s;
+    transition: opacity 0.15s ease, visibility 0s linear 0s;
   }
-  .ornament-mirror[data-tip]:active::after,
-  .ornament-rotate-btn[data-tip]:active::after {
-    opacity: 0;
-    visibility: hidden;
-    transition: none;
+  /* Przewracanie okładki (strona "twarda", obrót 3D): elementy z własnym
+     transform (wzory, pasek narzędzi pola) muszą same chować swoją
+     odwrotną stronę, bo nie dziedziczą tego od strony. Inaczej
+     prześwitują przez okładkę. */
+  .page-ornament,
+  .page-ornament .pattern-svg,
+  .textbox-wrapper > .fontsize-control,
+  .textbox-wrapper > .fontsize-spin,
+  .textbox-wrapper > .format-btn,
+  .textbox-wrapper > .font-family-control,
+  .textbox-wrapper > .toolbar-strip,
+  .cover-title {
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
   }
+  /* ---- Poprawki ---- */
+  /* Notki bez ograniczenia wysokości: te, które nie mieszczą się pod
+     przyciskami narzędzi, chowa skrypt (patrz "Notki" w App). */
+  .hint-stack { max-height: none; overflow: visible; }
+  /* Edytowane pole tekstowe (z paskiem narzędzi) zawsze na wierzchu. */
+  .textbox-wrapper:focus-within { z-index: 800000 !important; }
+  /* Pola z wymiarami nad wszystkim na stronie. */
+  .dim-input { z-index: 950000; }
+  /* Książka, zanim biblioteka ją przejmie: niewidoczna (bez mignięcia). */
+  .flipbook-root:not(.stf__parent) { visibility: hidden; }
+  /* Przyciski nigdy nie pokazują obramowania fokusu. */
+  button:focus, button:focus-visible { outline: none; }
 </style>
 </head>
 <body>
@@ -2039,6 +2015,124 @@
     if (e.ctrlKey) e.preventDefault();
   }, { passive: false });
 
+  // Przyciski (<button>) nigdy nie dostają fokusu, więc klawiatura nie może
+  // ich zaznaczyć ani nacisnąć. Kliknięcie działa normalnie, a to, co było
+  // edytowane (np. pole z wymiarem), traci fokus jak dawniej.
+  window.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    const b = e.target && e.target.closest ? e.target.closest("button") : null;
+    if (!b) return;
+    e.preventDefault();
+    if (b.closest(".color-picker")) return;   // panel kolorów: zaznaczenie w tekście zostaje
+    const a = document.activeElement;
+    if (a && a !== document.body && typeof a.blur === "function") a.blur();
+  }, true);
+
+  // Tab nie przechodzi między elementami okna (w polu tekstowym robi wcięcie).
+  window.addEventListener("keydown", (e) => {
+    if (e.key !== "Tab") return;
+    const a = document.activeElement;
+    if (a && a.isContentEditable) return;
+    e.preventDefault();
+  }, true);
+
+  // ---- Podpowiedzi (tooltipy) ------------------------------------------------
+  // Jeden tooltip dla całego programu. Pokazuje się po pół sekundy nad
+  // elementem z atrybutem data-tip. Przyciski narzędzi (.toggle-row): na lewo
+  // od przycisku. Wszystko inne: pod elementem (nad nim, gdy brak miejsca).
+  // Kliknięcie chowa go od razu; wraca dopiero po ponownym najechaniu.
+  (() => {
+    const tip = document.createElement("div");
+    tip.className = "app-tooltip";
+    document.body.appendChild(tip);
+
+    const SHOW_DELAY = 500, GAP = 6, EDGE = 4;
+    let target = null;       // element z data-tip pod myszką
+    let suppressed = null;   // kliknięty element: bez tooltipa, dopóki myszka z niego nie zejdzie
+    let timer = 0, watch = 0;
+
+    const usable = (el) => !!el && el.isConnected && el.getClientRects().length > 0;
+
+    const hide = (instant) => {
+      clearTimeout(timer); timer = 0;
+      clearInterval(watch); watch = 0;
+      if (instant) {
+        tip.style.transition = "none";
+        tip.classList.remove("visible");
+        void tip.offsetWidth;          // zastosuj od razu, bez animacji
+        tip.style.transition = "";
+      } else {
+        tip.classList.remove("visible");
+      }
+    };
+
+    const place = (el) => {
+      const r = el.getBoundingClientRect();
+      const w = tip.offsetWidth, hgt = tip.offsetHeight;
+      let left, top;
+      if (el.closest(".toggle-row")) {
+        left = r.left - GAP - w;
+        top = r.top + r.height / 2 - hgt / 2;
+      } else {
+        left = r.left + r.width / 2 - w / 2;
+        top = r.bottom + GAP;
+        if (top + hgt > window.innerHeight - EDGE) top = r.top - GAP - hgt;
+      }
+      left = Math.min(Math.max(left, EDGE), window.innerWidth - w - EDGE);
+      top = Math.min(Math.max(top, EDGE), window.innerHeight - hgt - EDGE);
+      tip.style.left = left + "px";
+      tip.style.top = top + "px";
+    };
+
+    let mouseHeld = false;   // przycisk myszy wciśnięty (np. przeciąganie): bez tooltipów
+
+    const show = () => {
+      timer = 0;
+      if (mouseHeld || !usable(target) || !target.dataset.tip) return;
+      tip.textContent = target.dataset.tip;
+      place(target);
+      tip.classList.add("visible");
+      // Element może zniknąć spod myszki bez zdarzenia mouseout (np. po
+      // wyłączeniu narzędzia), a jego tekst może się zmienić (np. okładka).
+      watch = setInterval(() => {
+        if (!usable(target) || !target.dataset.tip) { target = null; hide(true); return; }
+        if (tip.textContent !== target.dataset.tip) {
+          tip.textContent = target.dataset.tip;
+          place(target);
+        }
+      }, 200);
+    };
+
+    document.addEventListener("mouseover", (e) => {
+      const el = e.target && e.target.closest ? e.target.closest("[data-tip]") : null;
+      if (el === target) return;
+      hide(false);
+      if (el !== suppressed) suppressed = null;
+      target = el;
+      if (el && !suppressed) timer = setTimeout(show, SHOW_DELAY);
+    }, true);
+
+    // Myszka wyszła poza okno.
+    document.addEventListener("mouseout", (e) => {
+      if (e.relatedTarget) return;
+      target = null;
+      suppressed = null;
+      hide(false);
+    }, true);
+
+    // Kliknięcie, klawisz albo kółko myszy: tooltip znika od razu.
+    const dismiss = () => { suppressed = target; hide(true); };
+    window.addEventListener("mousedown", (e) => { mouseHeld = true; dismiss(); }, true);
+    window.addEventListener("mouseup", () => { mouseHeld = false; }, true);
+    // Zabezpieczenie: puszczenie przycisku mogło trafić poza stronę
+    // (np. do rozwiniętej listy czcionek). Ruch myszy bez wciśniętego
+    // przycisku zawsze odblokowuje tooltipy.
+    window.addEventListener("mousemove", (e) => { if (!e.buttons) mouseHeld = false; }, true);
+    window.addEventListener("keydown", dismiss, true);
+    window.addEventListener("wheel", dismiss, { capture: true, passive: true });
+    window.addEventListener("blur", () => { mouseHeld = false; target = null; suppressed = null; hide(true); });
+  })();
+
   const SHOW_COVER = true;
 
   // Number of inner pages the book STARTS with (pages are added/deleted
@@ -2188,11 +2282,11 @@
 
   // Opcje z paska: kolumny x wiersze punktów na KAŻDEJ stronie.
   const ALIGN_LAYOUTS = [
-    { cols: 1, rows: 1, title: "1 punkt na stronie" },
-    { cols: 1, rows: 2, title: "2 punkty na stronie" },
-    { cols: 2, rows: 2, title: "4 punkty na stronie" },
-    { cols: 2, rows: 3, title: "6 punktów na stronie" },
-    { cols: 3, rows: 3, title: "9 punktów na stronie" }
+    { cols: 1, rows: 1 },
+    { cols: 1, rows: 2 },
+    { cols: 2, rows: 2 },
+    { cols: 2, rows: 3 },
+    { cols: 3, rows: 3 }
   ];
 
   // Jak blisko kropki (w jednostkach strony) musi być środek elementu,
@@ -2434,14 +2528,22 @@
     }
   }
 
-  // Puts a picture (and its corner arrows) above everything else on its
-  // page, other pictures and text boxes included, while it is being moved
-  // or resized. `on = false` puts it back in its normal place.
+  // Element podczas przeciągania nad wszystkim; potem wraca jego własna warstwa.
+  const DRAG_Z = 900000;
+  function setDragZ(el, z) {
+    if (z !== null) {
+      if (el.dataset.prevZ === undefined) el.dataset.prevZ = el.style.zIndex;
+      el.style.zIndex = String(z);
+    } else if (el.dataset.prevZ !== undefined) {
+      el.style.zIndex = el.dataset.prevZ;
+      delete el.dataset.prevZ;
+    }
+  }
   function raiseImageDom(pageEl, id, on) {
     const img = pageEl.querySelector(`.page-image[data-image-id="${id}"]`);
-    if (img) img.style.zIndex = on ? "1000" : "";
+    if (img) setDragZ(img, on ? DRAG_Z : null);
     pageEl.querySelectorAll(`.image-handle[data-image-id="${id}"]`).forEach((el) => {
-      el.style.zIndex = on ? "1001" : "";
+      setDragZ(el, on ? DRAG_Z + 1 : null);
     });
   }
   // ---- Wzory (narzędzie "Wzory") ---------------------------------------------
@@ -2478,7 +2580,8 @@
   })();
   const PATTERN_MAP = new Map(PATTERNS.map((p) => [p.key, p]));
 
-  const PATTERN_SCALE = 0.3;
+  // Nowy wzór: jego dłuższy bok to taka część szerokości strony.
+  const DEFAULT_PATTERN_PART = 0.4;
   const MAX_PATTERN_PART = 0.5;
   const ORNAMENT_HANDLE = 11;      // strzałki rozmiaru (jak przy obrazach)
   const MIN_ORNAMENT_SIDE = 16;    // najkrótszy bok wzoru przy zmniejszaniu
@@ -2621,10 +2724,9 @@
     setDimInput(q("rot"), L.dims.rot, L.dims.rotText);
   }
 
-  // Wzór (i jego przycisk) nad wszystkim innym na stronie podczas przeciągania.
   function raiseOrnamentDom(pageEl, id, on) {
     pageEl.querySelectorAll(`[data-ornament-id="${id}"]`).forEach((el) => {
-      el.style.zIndex = on ? "1000" : "";
+      setDragZ(el, on ? DRAG_Z : null);
     });
   }
 
@@ -2665,14 +2767,13 @@
   // Pole z szerokością / wysokością / obrotem. Wygląda jak etykieta,
   // a po kliknięciu można wpisać wartość (Enter: zatwierdź, Esc: anuluj).
   // Szerokość pola dopasowana do tekstu (pos.width).
-  function DimInput({ kind, id, dim, pos, text, title, onCommit }) {
+  function DimInput({ kind, id, dim, pos, text, onCommit }) {
     return h("input", {
       type: "text",
       className: "dim-input",
       "data-dim-kind": kind,
       [kind === "image" ? "data-image-id" : "data-ornament-id"]: id,
       "data-dim": dim,
-      title,
       spellCheck: false,
       autoComplete: "off",
       style: {
@@ -2757,7 +2858,8 @@
           left:   (img.left * props.pageW) + "px",
           top:    (img.top  * props.pageH) + "px",
           width:  (img.w    * props.pageW) + "px",
-          height: (img.h    * props.pageH) + "px"
+          height: (img.h    * props.pageH) + "px",
+          zIndex: img.z
         }
       })),
       // Four resize handles per picture, inside its corners (shown only in
@@ -2776,7 +2878,8 @@
             left: pos[corner][0] + "px",
             top: pos[corner][1] + "px",
             width: hs + "px",
-            height: hs + "px"
+            height: hs + "px",
+            zIndex: img.z
           }
         }));
       }), 
@@ -2789,9 +2892,9 @@
         );
         return [
           h(DimInput, { key: "dw" + img.id, kind: "image", id: img.id, dim: "w", pos: d.w,
-            text: d.wText, title: "Szerokość", onCommit: props.onDimCommit }),
+            text: d.wText, onCommit: props.onDimCommit }),
           h(DimInput, { key: "dh" + img.id, kind: "image", id: img.id, dim: "h", pos: d.h,
-            text: d.hText, title: "Wysokość", onCommit: props.onDimCommit })
+            text: d.hText, onCommit: props.onDimCommit })
         ];
       }),
       // Wzory: nad obrazami, pod polami tekstowymi. Łapią kliknięcia tylko
@@ -2805,7 +2908,7 @@
             key: "orn" + o.id,
             className: "page-ornament" + (props.selectedOrnamentId === o.id ? " selected" : ""),
             "data-ornament-id": o.id,
-            style: L.box
+            style: { ...L.box, zIndex: o.z }
           },
             h("svg", {
               className: "pattern-svg",
@@ -2827,7 +2930,7 @@
             className: "ornament-rotate-btn",
             "data-ornament-id": o.id,
             "data-tip": "Obrót",
-            style: L.rotate
+            style: { ...L.rotate, zIndex: o.z }
           }, h(RotateIcon)),
           // Lustrzane odbicie: przy prawym górnym rogu.
           h("div", {
@@ -2835,17 +2938,17 @@
             className: "ornament-mirror",
             "data-ornament-id": o.id,
             "data-tip": "Lustrzane odbicie",
-            style: L.mirror
+            style: { ...L.mirror, zIndex: o.z }
           }, h(MirrorIcon)),
           // Szerokość, wysokość i obrót zaznaczonego wzoru, w jednym wierszu
           // (można je wpisać).
           ...(props.selectedOrnamentId === o.id ? [
             h(DimInput, { key: "odw" + o.id, kind: "ornament", id: o.id, dim: "w", pos: L.dims.w,
-              text: L.dims.wText, title: "Szerokość", onCommit: props.onDimCommit }),
+              text: L.dims.wText, onCommit: props.onDimCommit }),
             h(DimInput, { key: "odh" + o.id, kind: "ornament", id: o.id, dim: "h", pos: L.dims.h,
-              text: L.dims.hText, title: "Wysokość", onCommit: props.onDimCommit }),
+              text: L.dims.hText, onCommit: props.onDimCommit }),
             h(DimInput, { key: "odr" + o.id, kind: "ornament", id: o.id, dim: "rot", pos: L.dims.rot,
-              text: L.dims.rotText, title: "Obrót", onCommit: props.onDimCommit })
+              text: L.dims.rotText, onCommit: props.onDimCommit })
           ] : [])
         ];
       }),
@@ -3051,27 +3154,28 @@
 		  ref: (el) => { if (el) placeToolbar(el); },
           style: {
             left: (box.left * props.pageW) + "px",
-            top:  (box.top  * props.pageH) + "px"
+            top:  (box.top  * props.pageH) + "px",
+            zIndex: box.z
           }
         },
           h("div", { className: "toolbar-strip" }),
           h("div", {
             className: "format-btn format-bold",
             "data-cmd": "bold",
-            title: "Pogrubienie",
+            "data-tip": "Pogrubienie",
             ref: keepFocus,
             onClick: () => applyFormat("bold")
           }, "B"),
           h("div", {
             className: "format-btn format-italic",
             "data-cmd": "italic",
-            title: "Kursywa",
+            "data-tip": "Kursywa",
             ref: keepFocus,
             onClick: () => applyFormat("italic")
           }, "I"),
           h("select", {
             className: "font-family-control",
-            title: "Czcionka",
+            "data-tip": "Czcionka",
             defaultValue: DEFAULT_FONT.name,
             style: { fontFamily: DEFAULT_FONT.css },
             ref: (el) => {
@@ -3103,7 +3207,7 @@
           ),
           h("div", {
             className: "format-btn format-color",
-            title: "Kolor czcionki",
+            "data-tip": "Kolor czcionki",
             ref: keepFocus,
             onClick: (e) => {
               const bar = e.currentTarget.querySelector(".format-color-bar");
@@ -3127,12 +3231,13 @@
               }
             }
           },
-            h("div", { className: "fontsize-spin-btn up", title: "Większa czcionka", onClick: () => stepFontSize(1) }),
-            h("div", { className: "fontsize-spin-btn down", title: "Mniejsza czcionka", onClick: () => stepFontSize(-1) })
+            h("div", { className: "fontsize-spin-btn up", onClick: () => stepFontSize(1) }),
+            h("div", { className: "fontsize-spin-btn down", onClick: () => stepFontSize(-1) })
           ),
           h("input", {
             type: "number",
             className: "fontsize-control",
+			"data-tip": "Rozmiar czcionki",
             min: "1",
             max: "70",
             defaultValue: BASE_FONT_SIZE,
@@ -3324,9 +3429,7 @@
 
     useImperativeHandle(ref, () => ({ pageFlip: () => flipRef.current }), []);
 
-    // Created once per mount. The book is remounted (new `key`) whenever the
-    // size or the list of pages changes, so the settings never need updating.
-    useEffect(() => {
+    React.useLayoutEffect(() => {
       const el = containerRef.current;
       const p = propsRef.current;
       const flip = new PageFlip(el, {
@@ -3351,7 +3454,7 @@
       flipRef.current = flip;
     }, []);
 
-    return h("div", { ref: containerRef }, props.children);
+    return h("div", { ref: containerRef, className: "flipbook-root" }, props.children);
   });
 
   // Largest page that fits: two pages side by side horizontally, one page tall
@@ -4882,21 +4985,19 @@
     return holder.innerHTML;
   }
 
-  // "Odcisk" zawartości do sprawdzania, czy coś się zmieniło. Strony są
-  // liczone po kolei (dodanie i usunięcie stron nic nie zmienia), położenie
-  // pola przypiętego do kropki wynika z kropki.
   function docSnapshot(doc) {
     const index = new Map(doc.pageKeys.map((k, i) => [k, i]));
     const pg = (k) => (index.has(k) ? index.get(k) : k);   // okładki: "c1" / "c2"
     const r = (n) => (typeof n === "number" ? Math.round(n * 1e5) / 1e5 : null);
+    const z = (x) => (typeof x.z === "number" ? x.z : null);
     return JSON.stringify({
       pages: doc.pageKeys.length,
       boxes: doc.boxes.map((b) => b.anchor
-        ? [pg(b.page), r(b.width), b.html, r(b.anchor.x), r(b.anchor.y), !!b.anchor.line, b.anchor.imageId ?? null]
-        : [pg(b.page), r(b.width), b.html, r(b.left), r(b.top)]),
-      images: doc.images.map((im) => [im.id, pg(im.page), r(im.left), r(im.top), r(im.w), r(im.h)]),
+        ? [pg(b.page), r(b.width), b.html, r(b.anchor.x), r(b.anchor.y), !!b.anchor.line, b.anchor.imageId ?? null, z(b)]
+        : [pg(b.page), r(b.width), b.html, r(b.left), r(b.top), z(b)]),
+      images: doc.images.map((im) => [im.id, pg(im.page), r(im.left), r(im.top), r(im.w), r(im.h), z(im)]),
       ornaments: (doc.ornaments || []).map((o) =>
-        [o.id, pg(o.page), o.pattern, r(o.x), r(o.y), r(o.w), r(o.rot), !!o.flip])
+        [o.id, pg(o.page), o.pattern, r(o.x), r(o.y), r(o.w), r(o.rot), !!o.flip, z(o)])
     });
   }
 
@@ -4924,7 +5025,7 @@
       if (typeof im.src !== "string" || !im.src.startsWith("data:image/")) return null;
       if (![im.left, im.top, im.w, im.h].every(isNum) || im.w <= 0 || im.h <= 0) return null;
       imageIds.add(im.id);
-      images.push({ id: im.id, page: im.page, src: im.src, left: im.left, top: im.top, w: im.w, h: im.h });
+      images.push({ id: im.id, page: im.page, src: im.src, left: im.left, top: im.top, w: im.w, h: im.h, z: isNum(im.z) ? im.z : null });
     }
 
     const boxIds = new Set();
@@ -4947,7 +5048,7 @@
       if (!htmlHasText(html)) continue;
       boxIds.add(b.id);
       boxes.push({ id: b.id, page: b.page, left: b.left, top: b.top,
-                   width: isNum(b.width) ? b.width : undefined, anchor, html });
+                   width: isNum(b.width) ? b.width : undefined, anchor, html, z: isNum(b.z) ? b.z : null });
     }
     // Wzory (pliki z wersji 1 ich nie mają).
     const ornaments = [];
@@ -4959,9 +5060,13 @@
         if (typeof o.pattern !== "string" || ![o.x, o.y, o.w, o.rot].every(isNum) || o.w <= 0) return null;
         ornIds.add(o.id);
         if (!PATTERN_MAP.has(o.pattern)) continue;   // wzór, którego ten program nie zna
-        ornaments.push({ id: o.id, page: o.page, pattern: o.pattern, x: o.x, y: o.y, w: o.w, rot: o.rot, flip: !!o.flip });
+        ornaments.push({ id: o.id, page: o.page, pattern: o.pattern, x: o.x, y: o.y, w: o.w, rot: o.rot, flip: !!o.flip, z: isNum(o.z) ? o.z : null });
       }
     }
+    // Kolejność warstw. Starsze pliki jej nie mają: obrazy pod wzorami, wzory pod tekstami.
+    let zMax = 0;
+    [images, ornaments, boxes].forEach((list) => list.forEach((x) => { if (x.z != null) zMax = Math.max(zMax, x.z); }));
+    [images, ornaments, boxes].forEach((list) => list.forEach((x) => { if (x.z == null) x.z = ++zMax; }));
     let maxKey = 0;
     d.pageKeys.forEach((k) => { maxKey = Math.max(maxKey, parseInt(k.slice(1), 10)); });
     const nextPageNum = Math.max(maxKey + 1, Number.isInteger(d.nextPageNum) ? d.nextPageNum : 0);
@@ -5209,6 +5314,18 @@
     const ornamentsRef = useRef([]);   // dla natywnych listenerów (podpiętych raz)
     ornamentsRef.current = ornaments;
     const ornamentIdRef = useRef(0);
+    // Kolejność warstw: większe z = wyżej. Każdy nowy element i każdy element
+    // przesunięty / zmieniony w trybie przesuwania (z: null) dostaje najwyższe.
+    const zRef = useRef(0);
+    React.useLayoutEffect(() => {
+      const give = (list, set) => {
+        if (!list.some((x) => x.z == null)) return;
+        set((prev) => prev.map((x) => (x.z == null ? { ...x, z: ++zRef.current } : x)));
+      };
+      give(images, setImages);
+      give(ornaments, setOrnaments);
+      give(boxes, setBoxes);
+    }, [boxes, images, ornaments]);
     // Wzór wybrany na liście (klucz) albo null.
     const [selectedPattern, setSelectedPatternState] = useState(null);
     const selectedPatternRef = useRef(null);
@@ -5661,8 +5778,6 @@
     const [closeDialogOpen, setCloseDialogOpen] = useState(false);
     const closeDialogOpenRef = useRef(false);
 
-    // Cała kronika w postaci zapisywanej do pliku. Treść pól z ekranu
-    // (stan React bywa nieaktualny podczas pisania).
     const buildDoc = () => ({
       app: FILE_APP,
       version: FILE_VERSION,
@@ -5674,14 +5789,15 @@
           id: b.id, page: b.page, left: b.left, top: b.top, width: b.width,
           anchor: b.anchor || null,
           html: cleanBoxHtml(el ? el.innerHTML : b.html),
+          z: b.z ?? null,
           ...livePos(b, el)
         };
       }).filter((b) => htmlHasText(b.html)),
       images: imagesRef.current.map((im) => ({
-        id: im.id, page: im.page, src: im.src, left: im.left, top: im.top, w: im.w, h: im.h
+        id: im.id, page: im.page, src: im.src, left: im.left, top: im.top, w: im.w, h: im.h, z: im.z ?? null
       })),
       ornaments: ornamentsRef.current.map((o) => ({
-        id: o.id, page: o.page, pattern: o.pattern, x: o.x, y: o.y, w: o.w, rot: o.rot, flip: !!o.flip
+        id: o.id, page: o.page, pattern: o.pattern, x: o.x, y: o.y, w: o.w, rot: o.rot, flip: !!o.flip, z: o.z ?? null
       }))
     });
 
@@ -5768,6 +5884,7 @@
       boxIdRef.current = doc.boxes.reduce((m, b) => Math.max(m, b.id), 0);
       imageIdRef.current = doc.images.reduce((m, im) => Math.max(m, im.id), 0);
       ornamentIdRef.current = doc.ornaments.reduce((m, o) => Math.max(m, o.id), 0);
+      zRef.current = [...doc.images, ...doc.ornaments, ...doc.boxes].reduce((m, x) => Math.max(m, x.z || 0), 0);
       selectPattern(null);
       nextPageNumRef.current = doc.nextPageNum;
 
@@ -6020,7 +6137,7 @@
 
       // The wrapper is the box's layer, so that is what has to go on top.
       const originalZIndex = wrapper.style.zIndex;
-      wrapper.style.zIndex = "1000";
+      wrapper.style.zIndex = "900000";
 
       trackPointer((ev) => {
         const p = ev.touches ? ev.touches[0] : ev;
@@ -6047,7 +6164,7 @@
         wrapper.style.zIndex = originalZIndex;
         if (!moved) return;
         setBoxes((prev) => prev.map((b) =>
-            b.id === id ? { ...b, left: nextLeft, top: nextTop, width: lockedWidth, anchor: nextAnchor } : b
+            b.id === id ? { ...b, left: nextLeft, top: nextTop, width: lockedWidth, anchor: nextAnchor, z: null } : b
         ));
       });
     };
@@ -6092,7 +6209,7 @@
         raiseImageDom(pageEl, id, false);
         if (!moved) return;
         setImages((prev) => prev.map((im) =>
-          im.id === id ? { ...im, left: nextLeft, top: nextTop } : im
+          im.id === id ? { ...im, left: nextLeft, top: nextTop, z: null } : im
         ));
 		commitImageFollowers(id);
       });
@@ -6166,7 +6283,7 @@
         if (!moved) return;
         setImages((prev) => prev.map((im) =>
           im.id === id
-            ? { ...im, left: curL / scaleW, top: curT / scaleH, w: curW / scaleW, h: curH / scaleH }
+            ? { ...im, left: curL / scaleW, top: curT / scaleH, w: curW / scaleW, h: curH / scaleH, z: null }
             : im
         ));
 		commitImageFollowers(id);
@@ -6189,10 +6306,7 @@
       const innerW = pageEl.clientWidth, innerH = pageEl.clientHeight;
       const rect = pageEl.getBoundingClientRect();
 
-      // Rozmiar jak w podglądzie wzorów (jednostki strony), ale nie większy
-      // niż MAX_PATTERN_PART strony.
-      const u = pageW / REF_PAGE_W;
-      const W = Math.min(pat.width * u * PATTERN_SCALE,
+      const W = Math.min(DEFAULT_PATTERN_PART * pageW / Math.max(1, pat.ratio),
                          innerW * MAX_PATTERN_PART, innerH * MAX_PATTERN_PART / pat.ratio);
       const H = W * pat.ratio;
       let cx = clampCenter(clientX - rect.left, W / 2, innerW);
@@ -6233,7 +6347,7 @@
       }, () => {
         raiseOrnamentDom(pageEl, id, false);
         if (!moved) return;
-        setOrnaments((prev) => prev.map((x) => x.id === id ? { ...x, ...cur } : x));
+        setOrnaments((prev) => prev.map((x) => x.id === id ? { ...x, ...cur, z: null } : x));
       });
     };
 
@@ -6300,7 +6414,7 @@
         if (!moved) return;
         const c = centerFor(curW);
         setOrnaments((prev) => prev.map((x) => x.id === id
-          ? { ...x, x: c.x / pageW, y: c.y / pageH, w: curW / pageW } : x));
+          ? { ...x, x: c.x / pageW, y: c.y / pageH, w: curW / pageW, z: null } : x));
       });
     };
 
@@ -6348,7 +6462,7 @@
         setDragCursor(null);
         raiseOrnamentDom(pageEl, id, false);
         if (!moved) return;
-        setOrnaments((prev) => prev.map((x) => x.id === id ? { ...x, ...cur } : x));
+        setOrnaments((prev) => prev.map((x) => x.id === id ? { ...x, ...cur, z: null } : x));
       });
     };
     const startBoxResize = (id, startX, edge) => {
@@ -7173,7 +7287,19 @@
       savedRangeRef.current = null;
       setFragmentHighlight(null);
     }, [page]);
-
+    // ---- Notki ----
+    // Notka, która nie mieści się w całości pod przyciskami narzędzi, jest chowana.
+    const toggleRowRef = useRef(null);
+    const hintStackRef = useRef(null);
+    React.useLayoutEffect(() => {
+      const stack = hintStackRef.current, row = toggleRowRef.current;
+      if (!stack || !row) return;
+      const hints = Array.from(stack.children);
+      hints.forEach((el) => { el.style.display = ""; });
+      const limit = row.getBoundingClientRect().bottom + 10;
+      const tops = hints.map((el) => el.getBoundingClientRect().top);
+      hints.forEach((el, i) => { if (tops[i] < limit) el.style.display = "none"; });
+    });
     const boxesFor = (pageKey) => boxes.filter((b) => b.page === pageKey);
     const imagesFor = (pageKey) => images.filter((im) => im.page === pageKey);
     const ornamentsFor = (pageKey) => ornaments.filter((o) => o.page === pageKey);
@@ -7266,7 +7392,7 @@
             ...pageKeys.map((k) => h(Surface, { key: k, ...surfaceProps(k, false) })),
             h(Surface, { key: "c2", ...surfaceProps("c2", true) })
           ),
-          h("div", { className: "toggle-row" },
+          h("div", { className: "toggle-row", ref: toggleRowRef },
             h("div", {
               className: "toggle-btn" + (tool === TOOL_TEXT ? " active" : "") + (coverLock ? " disabled" : ""),
               "data-tip": "Dodawanie tekstu" + coverNote,
@@ -7323,7 +7449,7 @@
           ),
           // Lista wzorów na lewo od książki (tylko przy włączonym narzędziu).
           tool === TOOL_PATTERN && h(PatternPanel, { selected: selectedPattern, onSelect: selectPattern }),
-          !hideHints && h("div", { className: "hint-stack" },
+          !hideHints && h("div", { className: "hint-stack", ref: hintStackRef },
             alignOn && h("div", { className: "move-hint" },
               "Aby wyrównać treść na stronie, przeciągnij ją tak, żeby jej środek znalazł się blisko kropki.",
               h("br"),
@@ -7495,10 +7621,9 @@
         // Kliknięcie paska nie zabiera fokusu z edytowanego tekstu.
         onMouseDown: (e) => e.preventDefault()
       },
-        ALIGN_LAYOUTS.map((l, i) => h("div", {
+        ALIGN_LAYOUTS.map((_, i) => h("div", {
           key: i,
           className: "align-option" + (i === alignLayout ? " active" : ""),
-          title: l.title,
           onClick: () => setAlignLayout(i)
         }, h(AlignLayoutIcon, { index: i })))
       ),
