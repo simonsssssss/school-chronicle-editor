@@ -2545,10 +2545,37 @@
       setDragZ(el, on ? DRAG_Z + 1 : null);
     });
   }
+
+  // Zapas wokół rysunku (jednostki viewBox), żeby grubość linii nie była
+  // obcinana: getBBox mierzy samą geometrię, bez obrysu.
+  const PATTERN_PAD = 1.5;
+
+  // Prawdziwe granice rysunku w SVG (bez pustego miejsca wokół), albo null.
+  function tightViewBox(svg) {
+    try {
+      const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      while (svg.firstChild) g.appendChild(svg.firstChild);
+      svg.appendChild(g);
+      const b = g.getBBox();
+      while (g.firstChild) svg.insertBefore(g.firstChild, g);
+      g.remove();
+      if (!(b.width > 0) || !(b.height > 0)) return null;
+      return [
+        b.x - PATTERN_PAD,
+        b.y - PATTERN_PAD,
+        b.width + 2 * PATTERN_PAD,
+        b.height + 2 * PATTERN_PAD
+      ].map((n) => Math.round(n * 100) / 100);
+    } catch (e) {
+      return null;
+    }
+  }
+
   // ---- Wzory (narzędzie "Wzory") ---------------------------------------------
   // Wzory są rysowane przy starcie w ukrytym #pattern-source. Tutaj każdy
   // zamienia się w gotowy kawałek SVG. key ("w1", "w2"...) trafia do pliku,
-  // więc nie zależy od kolejności na liście.
+  // więc nie zależy od kolejności na liście. viewBox jest przycięty do
+  // samego rysunku, więc ramka wzoru dotyka jego krawędzi.
   const PATTERNS = (() => {
     const src = document.getElementById("pattern-source");
     if (!src) return [];
@@ -2558,7 +2585,8 @@
       const svg = card.querySelector("svg");
       if (!title || !svg) return;
       const m = /^\s*(\d+)\.\s*(.*)$/.exec(title.textContent);
-      const vb = (svg.getAttribute("viewBox") || "").trim().split(/[\s,]+/).map(Number);
+      let vb = tightViewBox(svg);
+      if (!vb) vb = (svg.getAttribute("viewBox") || "").trim().split(/[\s,]+/).map(Number);
       if (!m || vb.length !== 4 || !(vb[2] > 0) || !(vb[3] > 0)) return;
       const copy = svg.cloneNode(true);
       copy.querySelectorAll("[id]").forEach((el) => el.removeAttribute("id"));
@@ -2569,7 +2597,7 @@
         name: m[2].trim().replace(/(^|\s)(\S) /g, "$1$2\u00A0"),
         viewBox: vb.join(" "),
         ratio: vb[3] / vb[2],                   // wysokość / szerokość
-        width: parseFloat(svg.getAttribute("width")) || vb[2],
+        width: vb[2],
         html: copy.innerHTML
       });
     });
@@ -2579,7 +2607,10 @@
   })();
   const PATTERN_MAP = new Map(PATTERNS.map((p) => [p.key, p]));
 
-  const DEFAULT_PATTERN_PART = 0.25;
+  // Domyślna "wielkość" nowego wzoru: pierwiastek z jego pola powierzchni
+  // jako ułamek szerokości strony. Dzięki temu listwy, rozety i gałązki
+  // zajmują podobną powierzchnię, niezależnie od kształtu.
+  const DEFAULT_PATTERN_SIZE = 0.1;
   const MAX_PATTERN_PART = 0.5;
   const ORNAMENT_HANDLE = 11;      // strzałki rozmiaru (jak przy obrazach)
   const MIN_ORNAMENT_SIDE = 16;    // najkrótszy bok wzoru przy zmniejszaniu
@@ -6304,8 +6335,8 @@
       const innerW = pageEl.clientWidth, innerH = pageEl.clientHeight;
       const rect = pageEl.getBoundingClientRect();
 
-      const W = Math.min(DEFAULT_PATTERN_PART * pageW / Math.max(1, pat.ratio),
-                         innerW * MAX_PATTERN_PART, innerH * MAX_PATTERN_PART / pat.ratio);
+      const W = Math.min(DEFAULT_PATTERN_SIZE * pageW / Math.sqrt(pat.ratio),
+                         innerW * (pat.ratio < 0.25 ? 0.4 : MAX_PATTERN_PART), innerH * MAX_PATTERN_PART / pat.ratio);
       const H = W * pat.ratio;
       let cx = clampCenter(clientX - rect.left, W / 2, innerW);
       let cy = clampCenter(clientY - rect.top, H / 2, innerH);
