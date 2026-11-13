@@ -7805,7 +7805,8 @@
           h("div", { className: "dialog-title" }, "Dodaj kropkę"),
           h("div", { className: "dialog-text" },
             "Podaj odległości kropki od krawędzi strony. Wartości są w\u00A0jednostkach strony, " +
-            `tych samych co rozmiary czcionek, obrazów i\u00A0wzorów.`
+            `tych samych co rozmiary czcionek, obrazów i\u00A0wzorów. Strona ma ${REF_PAGE_W}\u00A0j. ` +
+			`szerokości i\u00A0${PAGE_H_UNITS}\u00A0j. wysokości.`
           ),
           h("div", { className: "dot-fields" },
             DOT_FIELDS.map(([f, label]) => h("label", { key: f, className: "dot-field" },
