@@ -698,6 +698,37 @@ static bool IsWebView2Installed()
 
 // ---------------------------------------------------------------------------
 
+#ifndef ABM_GETAUTOHIDEBAREX
+#define ABM_GETAUTOHIDEBAREX 0x0000000b
+#endif
+
+// Maximized: Windows pushes the window a few pixels past every screen edge
+// (that is where the normal frame would be). The whole window is our client
+// area, so cut it back to the monitor's work area.
+static void FitMaximizedClient(RECT& rc)
+{
+    HMONITOR mon = MonitorFromRect(&rc, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = { sizeof(mi) };
+    if (!GetMonitorInfoW(mon, &mi)) return;
+    rc = mi.rcWork;
+
+    // Auto-hidden taskbar: a window covering the whole monitor would stop it
+    // from sliding out, so leave 1 pixel free on the edge where it hides.
+    APPBARDATA state = { sizeof(state) };
+    if (!(SHAppBarMessage(ABM_GETSTATE, &state) & ABS_AUTOHIDE)) return;
+    for (UINT edge = ABE_LEFT; edge <= ABE_BOTTOM; edge++)
+    {
+        APPBARDATA bar = { sizeof(bar) };
+        bar.uEdge = edge;
+        bar.rc = mi.rcMonitor;
+        if (!SHAppBarMessage(ABM_GETAUTOHIDEBAREX, &bar)) continue;
+        if (edge == ABE_LEFT)        rc.left += 1;
+        else if (edge == ABE_TOP)    rc.top += 1;
+        else if (edge == ABE_RIGHT)  rc.right -= 1;
+        else                         rc.bottom -= 1;
+    }
+}
+
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     switch (msg)
@@ -713,9 +744,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
     // Zero-size non-client frame: DWM still treats this as a normal
     // captioned window (native animations), but nothing is drawn there.
+    // Maximized: the client area is cut back to the screen (see above).
     case WM_NCCALCSIZE:
         if (wParam == TRUE)
+        {
+            if (IsZoomed(hwnd))
+                FitMaximizedClient(((NCCALCSIZE_PARAMS*)lParam)->rgrc[0]);
             return 0;
+        }
         break;
 
     // Prevent Windows from repainting the native caption (icon, title,
@@ -752,7 +788,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         // (e.g. Win+Left/Right snapping), maximize it again.
         if (wParam == SIZE_RESTORED && IsWindowVisible(hwnd))
             PostMessage(hwnd, WM_APP_KEEP_MAXIMIZED, 0, 0);
-        ResizeWebView(hwnd);
+        // Minimized: leave the WebView at its size. Otherwise the page would
+        // rebuild the book for a tiny window and show that for a moment
+        // after coming back.
+        if (wParam != SIZE_MINIMIZED) ResizeWebView(hwnd);
         InvalidateRect(hwnd, nullptr, TRUE); // the caption buttons move with the right edge
         break;
 
@@ -854,7 +893,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case WM_SYSCOMMAND:
     {
         UINT cmd = (UINT)(wParam & 0xFFF0);
-        if (cmd == SC_KEYMENU || cmd == SC_MOUSEMENU || cmd == SC_MAXIMIZE) return 0;
+        if (cmd == SC_KEYMENU || cmd == SC_MOUSEMENU) return 0;
         // Win+Down (and similar) must not shrink the maximized window.
         // Restoring from the taskbar after minimizing is still allowed.
         if (cmd == SC_RESTORE && !IsIconic(hwnd)) return 0;

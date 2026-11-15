@@ -5774,7 +5774,8 @@
       setPageKeys(remaining);
       setPage(next);                 // also feeds startPage via pageRef
       setBookVersion((v) => v + 1);  // remount the book with the new pages
-    };
+      showToast("Usunięto dwie strony");
+	};
 	
     const addPages = () => {
       if (dialogOpenRef.current) return;
