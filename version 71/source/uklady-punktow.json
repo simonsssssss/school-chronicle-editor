@@ -1,0 +1,16 @@
+{
+  "app": "KronikaSzkolna",
+  "type": "uklady-punktow",
+  "version": 1,
+  "layouts": [
+    {
+      "name": "15.11.2026 03:31:55",
+      "dots": [
+        {
+          "x": 0.5,
+          "y": 0.4991896272285251
+        }
+      ]
+    }
+  ]
+}
