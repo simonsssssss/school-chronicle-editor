@@ -2,7 +2,7 @@
 
 windres app.rc -O coff -o app_res.o
 
-g++ main.cpp app_res.o -o app.exe -municode -mwindows -O2 -s -static -static-libgcc -static-libstdc++ WebView2Loader.dll.lib -lole32 -lshell32 -luser32 -lgdi32 -luuid
+g++ main.cpp app_res.o -o app.exe -municode -mwindows -O2 -s -static -static-libgcc -static-libstdc++ -lole32 -lshell32 -luser32 -lgdi32 -luuid
 
 */
 
@@ -16,6 +16,8 @@ g++ main.cpp app_res.o -o app.exe -municode -mwindows -O2 -s -static -static-lib
 #include <wrl/client.h>
 #include <string>
 #include <vector>
+#include <utility>
+#include <cstring>
 #include <shobjidl.h>
 #include "WebView2.h"
 
@@ -270,8 +272,7 @@ static bool ResultPath(IFileDialog* dlg, std::wstring& out)
     return true;
 }
 
-// The normal Windows "Open" window. Exactly one existing .kronika file.
-static bool PickOpenPath(HWND hwnd, std::wstring& out)
+static bool PickOpenPath(HWND hwnd, std::wstring& out, const wchar_t* title = nullptr)
 {
     ComPtr<IFileOpenDialog> dlg;
     if (FAILED(CoCreateInstance(CLSID_FileOpenDialog_, nullptr, CLSCTX_INPROC_SERVER,
@@ -279,6 +280,7 @@ static bool PickOpenPath(HWND hwnd, std::wstring& out)
         return false;
     COMDLG_FILTERSPEC types[] = { { FILE_FILTER_NAME, FILE_FILTER_SPEC } };
     dlg->SetFileTypes(1, types);
+    if (title) dlg->SetTitle(title);
     DWORD opts = 0;
     dlg->GetOptions(&opts);
     // No FOS_ALLOWMULTISELECT: one file only.
@@ -352,6 +354,322 @@ static bool WriteUtf8FileSafely(const std::wstring& path, const std::wstring& te
     return ok;
 }
 
+// ---- View-only copy -----------------------------------------------------------
+// "Export" makes a copy of app.exe with a package glued to its end: the files
+// the page needs (flipbook.html, lib, fonts, WebView2Loader.dll) and one
+// chronicle. A copy that finds such a package at its own end starts as a
+// viewer: it unpacks those files, shows that chronicle and offers no tools.
+//
+// Package: entries [name length, 4 bytes][data length, 4 bytes][name][data],
+// then [size of all entries, 8 bytes][PACKAGE_MAGIC, 8 bytes].
+
+const char PACKAGE_MAGIC[]         = "KRONIKA1";   // exactly 8 characters
+const char PACKAGE_DOC_NAME[]      = "kronika";    // the chronicle (never written to disk)
+const wchar_t VIEWER_FOLDER_NAME[] = L"Podglad";
+const wchar_t VIEWER_CLASS_NAME[]  = L"KronikaSzkolnaViewerWindow";
+const wchar_t LOADER_DLL_NAME[]    = L"WebView2Loader.dll";
+
+bool g_viewer = false;          // this copy only shows its own chronicle
+std::wstring g_pageDir;         // folder of flipbook.html, with a trailing backslash
+std::wstring g_viewerDoc;       // viewer: the chronicle, until the page asks for it
+std::wstring g_exportSource;    // export: the chosen .kronika file...
+std::wstring g_exportContent;   // ...and its content, until the page has checked it
+
+struct PackedFile { std::string name; std::string data; };
+enum PackageState { PACKAGE_NONE, PACKAGE_OK, PACKAGE_BAD };
+
+// WebView2Loader.dll is loaded by hand, not listed among the DLLs Windows
+// needs to start app.exe: a view-only copy has it inside itself, so at start
+// there is no such file next to it yet.
+typedef HRESULT (STDAPICALLTYPE *CreateEnvironmentFn)(PCWSTR, PCWSTR, ICoreWebView2EnvironmentOptions*,
+    ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler*);
+typedef HRESULT (STDAPICALLTYPE *GetBrowserVersionFn)(PCWSTR, LPWSTR*);
+CreateEnvironmentFn g_createEnvironment = nullptr;
+GetBrowserVersionFn g_getBrowserVersion = nullptr;
+
+static bool LoadWebView2Loader(const std::wstring& dllPath)
+{
+    HMODULE dll = LoadLibraryExW(dllPath.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+    if (!dll) return false;
+    g_createEnvironment = (CreateEnvironmentFn)(void*)GetProcAddress(dll, "CreateCoreWebView2EnvironmentWithOptions");
+    g_getBrowserVersion = (GetBrowserVersionFn)(void*)GetProcAddress(dll, "GetAvailableCoreWebView2BrowserVersionString");
+    return g_createEnvironment && g_getBrowserVersion;
+}
+
+static std::wstring GetExePath()
+{
+    wchar_t exePath[MAX_PATH];
+    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    return exePath;
+}
+
+static std::string ToUtf8(const std::wstring& text)
+{
+    int len = WideCharToMultiByte(CP_UTF8, 0, text.c_str(), (int)text.size(), nullptr, 0, nullptr, nullptr);
+    std::string out(len > 0 ? len : 0, '\0');
+    if (len > 0) WideCharToMultiByte(CP_UTF8, 0, text.c_str(), (int)text.size(), &out[0], len, nullptr, nullptr);
+    return out;
+}
+
+static std::wstring FromUtf8(const std::string& text)
+{
+    int len = MultiByteToWideChar(CP_UTF8, 0, text.data(), (int)text.size(), nullptr, 0);
+    std::wstring out(len > 0 ? len : 0, L'\0');
+    if (len > 0) MultiByteToWideChar(CP_UTF8, 0, text.data(), (int)text.size(), &out[0], len);
+    return out;
+}
+
+// ReadFile / WriteFile until everything is done (they take at most 4 GB at once).
+static bool ReadExact(HANDLE f, void* buf, size_t size)
+{
+    char* p = static_cast<char*>(buf);
+    while (size > 0)
+    {
+        DWORD part = size > 0x4000000 ? 0x4000000 : (DWORD)size, done = 0;
+        if (!ReadFile(f, p, part, &done, nullptr) || done == 0) return false;
+        p += done;
+        size -= done;
+    }
+    return true;
+}
+
+static bool WriteAll(HANDLE f, const void* buf, size_t size)
+{
+    const char* p = static_cast<const char*>(buf);
+    while (size > 0)
+    {
+        DWORD part = size > 0x4000000 ? 0x4000000 : (DWORD)size, done = 0;
+        if (!WriteFile(f, p, part, &done, nullptr) || done == 0) return false;
+        p += done;
+        size -= done;
+    }
+    return true;
+}
+
+// A whole file exactly as it is on disk (no text conversion).
+static bool ReadFileBytes(const std::wstring& path, std::string& out)
+{
+    HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return false;
+    LARGE_INTEGER size;
+    bool ok = GetFileSizeEx(f, &size) && size.QuadPart <= 0x7FFFFFFF;
+    if (ok)
+    {
+        out.assign((size_t)size.QuadPart, '\0');
+        ok = out.empty() || ReadExact(f, &out[0], out.size());
+    }
+    CloseHandle(f);
+    return ok;
+}
+
+// "<name>.<process number>.tmp": two copies started at once never share it.
+static std::wstring TempNameFor(const std::wstring& path)
+{
+    wchar_t suffix[32];
+    wsprintfW(suffix, L".%u.tmp", (unsigned)GetCurrentProcessId());
+    return path + suffix;
+}
+
+static bool FileHasSize(const std::wstring& path, size_t size)
+{
+    WIN32_FILE_ATTRIBUTE_DATA info;
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &info)) return false;
+    if (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) return false;
+    return info.nFileSizeHigh == 0 && info.nFileSizeLow == size;
+}
+
+// Every file of a folder that lies next to app.exe ("lib", "fonts").
+static bool AddFolderFiles(const std::wstring& folder, std::vector<PackedFile>& files)
+{
+    WIN32_FIND_DATAW fd;
+    HANDLE find = FindFirstFileW((GetExeDir() + folder + L"\\*").c_str(), &fd);
+    if (find == INVALID_HANDLE_VALUE) return false;
+    bool ok = true;
+    do
+    {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        PackedFile pf;
+        pf.name = ToUtf8(folder + L"/" + fd.cFileName);
+        ok = ReadFileBytes(GetExeDir() + folder + L"\\" + fd.cFileName, pf.data);
+        if (ok) files.push_back(std::move(pf));
+    } while (ok && FindNextFileW(find, &fd));
+    FindClose(find);
+    return ok;
+}
+
+// Export: writes the view-only copy. As with saving, a "...tmp" file is
+// written first, so a failed export never damages a file that was there.
+static bool BuildViewerFile(const std::wstring& target, const std::wstring& chronicle)
+{
+    std::string exe;
+    if (!ReadFileBytes(GetExePath(), exe)) return false;
+
+    std::vector<PackedFile> files(2);
+    files[0].name = "flipbook.html";
+    files[1].name = ToUtf8(LOADER_DLL_NAME);
+    if (!ReadFileBytes(GetExeDir() + L"flipbook.html", files[0].data)) return false;
+    if (!ReadFileBytes(GetExeDir() + LOADER_DLL_NAME, files[1].data)) return false;
+    if (!AddFolderFiles(L"lib", files)) return false;
+    AddFolderFiles(L"fonts", files);   // the cover font: the page has a replacement for it
+
+    PackedFile doc;
+    doc.name = PACKAGE_DOC_NAME;
+    doc.data = ToUtf8(chronicle);
+    files.push_back(std::move(doc));
+
+    std::wstring tmp = TempNameFor(target);
+    HANDLE f = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return false;
+
+    ULONGLONG packageSize = 0;
+    bool ok = WriteAll(f, exe.data(), exe.size());
+    for (size_t i = 0; ok && i < files.size(); i++)
+    {
+        DWORD nameLen = (DWORD)files[i].name.size(), dataLen = (DWORD)files[i].data.size();
+        ok = WriteAll(f, &nameLen, 4) && WriteAll(f, &dataLen, 4)
+          && WriteAll(f, files[i].name.data(), nameLen)
+          && WriteAll(f, files[i].data.data(), dataLen);
+        packageSize += 8ULL + nameLen + dataLen;
+    }
+    ok = ok && WriteAll(f, &packageSize, 8) && WriteAll(f, PACKAGE_MAGIC, 8) && FlushFileBuffers(f);
+    CloseHandle(f);
+    if (ok) ok = MoveFileExW(tmp.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+    if (!ok) DeleteFileW(tmp.c_str());
+    return ok;
+}
+
+// Start: looks for a package at the end of this very .exe file.
+// PACKAGE_NONE: the normal program. PACKAGE_BAD: a damaged view-only copy.
+static PackageState ReadPackage(std::vector<PackedFile>& files, std::string& chronicle)
+{
+    HANDLE f = CreateFileW(GetExePath().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return PACKAGE_NONE;
+
+    PackageState state = PACKAGE_NONE;
+    LARGE_INTEGER size, pos;
+    ULONGLONG packageSize = 0;
+    char magic[8];
+    if (GetFileSizeEx(f, &size) && size.QuadPart > 16)
+    {
+        pos.QuadPart = size.QuadPart - 16;
+        if (SetFilePointerEx(f, pos, nullptr, FILE_BEGIN)
+            && ReadExact(f, &packageSize, 8) && ReadExact(f, magic, 8)
+            && memcmp(magic, PACKAGE_MAGIC, 8) == 0)
+        {
+            state = PACKAGE_BAD;
+            bool ok = packageSize <= (ULONGLONG)size.QuadPart - 16;
+            if (ok)
+            {
+                pos.QuadPart = size.QuadPart - 16 - (LONGLONG)packageSize;
+                ok = SetFilePointerEx(f, pos, nullptr, FILE_BEGIN) != 0;
+            }
+            bool haveDoc = false;
+            ULONGLONG left = packageSize;
+            while (ok && left > 0)
+            {
+                DWORD nameLen = 0, dataLen = 0;
+                ok = left >= 8 && ReadExact(f, &nameLen, 4) && ReadExact(f, &dataLen, 4);
+                if (!ok) break;
+                left -= 8;
+                ok = nameLen > 0 && nameLen <= 512 && (ULONGLONG)nameLen + dataLen <= left;
+                if (!ok) break;
+                PackedFile pf;
+                pf.name.assign(nameLen, '\0');
+                pf.data.assign(dataLen, '\0');
+                ok = ReadExact(f, &pf.name[0], nameLen)
+                  && (dataLen == 0 || ReadExact(f, &pf.data[0], dataLen));
+                if (!ok) break;
+                left -= (ULONGLONG)nameLen + dataLen;
+                if (pf.name == PACKAGE_DOC_NAME) { chronicle.swap(pf.data); haveDoc = true; }
+                else files.push_back(std::move(pf));
+            }
+            if (ok && haveDoc) state = PACKAGE_OK;
+        }
+    }
+    CloseHandle(f);
+    return state;
+}
+
+// Viewer start: puts the page's files into the user's data folder and gives
+// back that folder (with a trailing backslash). The folder's name is made
+// from the files themselves, so copies exported by the same version of the
+// program share one folder, and another version never overwrites it.
+static bool UnpackViewerFiles(const std::vector<PackedFile>& files, std::wstring& dirOut)
+{
+    ULONGLONG hash = 1469598103934665603ULL;
+    for (const PackedFile& pf : files)
+    {
+        for (unsigned char c : pf.name) { hash ^= c; hash *= 1099511628211ULL; }
+        for (unsigned char c : pf.data) { hash ^= c; hash *= 1099511628211ULL; }
+    }
+    wchar_t id[32];
+    wsprintfW(id, L"%08X%08X", (unsigned)(hash >> 32), (unsigned)(hash & 0xFFFFFFFF));
+
+    std::wstring dir = GetUserDataDir() + L"\\" + VIEWER_FOLDER_NAME;
+    CreateDirectoryW(dir.c_str(), nullptr);   // fine if it already exists
+    dir = dir + L"\\" + id;
+    CreateDirectoryW(dir.c_str(), nullptr);
+    dir += L'\\';
+
+    for (const PackedFile& pf : files)
+    {
+        // Only plain names like "flipbook.html" or "lib/react.js".
+        if (pf.name.empty() || pf.name[0] == '/' || pf.name.find("..") != std::string::npos
+            || pf.name.find(':') != std::string::npos || pf.name.find('\\') != std::string::npos)
+            return false;
+
+        std::wstring rel = FromUtf8(pf.name);
+        for (wchar_t& c : rel) if (c == L'/') c = L'\\';
+        size_t slash = rel.find_last_of(L'\\');
+        if (slash != std::wstring::npos) CreateDirectoryW((dir + rel.substr(0, slash)).c_str(), nullptr);
+
+        std::wstring path = dir + rel;
+        if (FileHasSize(path, pf.data.size())) continue;   // unpacked earlier
+
+        std::wstring tmp = TempNameFor(path);
+        HANDLE f = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        bool ok = f != INVALID_HANDLE_VALUE;
+        if (ok)
+        {
+            ok = WriteAll(f, pf.data.data(), pf.data.size());
+            CloseHandle(f);
+            if (ok) ok = MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
+            if (!ok) DeleteFileW(tmp.c_str());
+        }
+        // Another copy started at the same moment may have just written it.
+        if (!ok && !FileHasSize(path, pf.data.size())) return false;
+    }
+    dirOut = dir;
+    return true;
+}
+
+// The Windows "Save as" window for the view-only copy: an .exe file,
+// suggested name = name of the chosen chronicle file.
+static bool PickExportPath(HWND hwnd, const std::wstring& source, std::wstring& out)
+{
+    ComPtr<IFileSaveDialog> dlg;
+    if (FAILED(CoCreateInstance(CLSID_FileSaveDialog_, nullptr, CLSCTX_INPROC_SERVER,
+                                IID_IFileSaveDialog_, reinterpret_cast<void**>(dlg.GetAddressOf()))))
+        return false;
+    COMDLG_FILTERSPEC types[] = { { L"Kronika do przegl\u0105dania (*.exe)", L"*.exe" } };
+    dlg->SetFileTypes(1, types);
+    dlg->SetDefaultExtension(L"exe");
+    dlg->SetTitle(L"Zapisz wersj\u0119 do przegl\u0105dania");
+
+    std::wstring name = source.substr(source.find_last_of(L"\\/") + 1);
+    size_t dot = name.find_last_of(L'.');
+    if (dot != std::wstring::npos && dot > 0) name.erase(dot);
+    dlg->SetFileName(name.c_str());
+
+    DWORD opts = 0;
+    dlg->GetOptions(&opts);
+    dlg->SetOptions(opts | FOS_OVERWRITEPROMPT | FOS_PATHMUSTEXIST | FOS_FORCEFILESYSTEM);
+    if (FAILED(dlg->Show(hwnd))) return false;
+    return ResultPath(dlg.Get(), out);
+}
+
 // The fade-out that ends with DestroyWindow (see WM_TIMER).
 static void StartFadeOut(HWND hwnd)
 {
@@ -374,21 +692,29 @@ static void ProcessPageMessages(HWND hwnd)
         size_t nl = msg.find(L'\n');
         std::wstring cmd = msg.substr(0, nl);
         std::wstring rest = (nl == std::wstring::npos) ? L"" : msg.substr(nl + 1);
-
+        // A view-only copy: the page only asks for its chronicle.
+        if (g_viewer)
+        {
+            if (cmd == L"viewerReady")
+            {
+                PostToPage(L"viewerDoc\n" + g_viewerDoc);
+                g_viewerDoc.clear();
+                g_viewerDoc.shrink_to_fit();
+            }
+            continue;
+        }
         if (cmd == L"dirty")
         {
             g_dirty = (rest == L"1");
         }
-        else if (cmd == L"save")
+        else if (cmd == L"save" || cmd == L"saveAs")
         {
-            // Not a file yet: ask where. Already a file: just write the changes.
-            std::wstring path = g_filePath;
+            // "saveAs": zawsze pyta o miejsce, nawet gdy kronika jest już plikiem.
+            std::wstring path = (cmd == L"saveAs") ? std::wstring() : g_filePath;
             if (path.empty() && !PickSavePath(hwnd, path)) { PostToPage(L"saveCancelled"); continue; }
             bool ok = WriteUtf8FileSafely(path, rest);
 
-            // The known file can't be written any more (USB stick removed,
-            // read-only file...): let the user choose another place.
-            if (!ok && !g_filePath.empty())
+            if (!ok && cmd == L"save" && !g_filePath.empty())
             {
                 MessageBoxW(hwnd,
                     L"Nie uda\u0142o si\u0119 zapisa\u0107 pliku w dotychczasowym miejscu.\n\n"
@@ -451,6 +777,35 @@ static void ProcessPageMessages(HWND hwnd)
             if (!FileMissing(path))
                 MoveFileExW(path.c_str(), (path + L".bad").c_str(), MOVEFILE_REPLACE_EXISTING);
             WriteUtf8FileSafely(GetLayoutsPath(), L"");   // empty file = empty list
+        }
+        else if (cmd == L"newDoc")         // nowa, pusta kronika: nie jest jeszcze plikiem
+        {
+            g_filePath.clear();
+            g_pendingOpenPath.clear();
+        }
+        else if (cmd == L"export")         // view-only copy, step 1: which chronicle file
+        {
+            std::wstring path, content;
+            if (!PickOpenPath(hwnd, path, L"Wybierz plik kroniki")) { PostToPage(L"exportCancelled"); continue; }
+            if (!ReadUtf8File(path, content)) { PostToPage(L"exportReadFailed"); continue; }
+            g_exportSource = path;
+            g_exportContent.swap(content);
+            PostToPage(L"exportCheck\n" + g_exportContent);   // the page checks that it is a chronicle
+        }
+        else if (cmd == L"exportRejected") // not a chronicle file
+        {
+            g_exportSource.clear();
+            g_exportContent.clear();
+        }
+        else if (cmd == L"exportAccepted") // step 2: where to save, then write the file
+        {
+            std::wstring target;
+            bool picked = !g_exportSource.empty() && PickExportPath(hwnd, g_exportSource, target);
+            bool ok = picked && BuildViewerFile(target, g_exportContent);
+            g_exportSource.clear();
+            g_exportContent.clear();
+            g_exportContent.shrink_to_fit();
+            PostToPage(!picked ? L"exportCancelled" : ok ? L"exported" : L"exportFailed");
         }
         else if (cmd == L"closeAsked")     // the page shows its closing window
         {
@@ -674,7 +1029,8 @@ public:
                 ICoreWebView2, ICoreWebView2ProcessFailedEventArgs>(IID_ProcessFailedHandler_, OnProcessFailed);
             g_webview->add_ProcessFailed(failHandler, &token);
             failHandler->Release();
-            std::wstring htmlUrl = ToFileUrl(GetExeDir() + L"flipbook.html");
+            std::wstring htmlUrl = ToFileUrl(g_pageDir + L"flipbook.html");
+            if (g_viewer) htmlUrl += L"?viewer=1";   // the page shows the book only
             HRESULT navHr = g_webview->Navigate(htmlUrl.c_str());
             if (FAILED(navHr))
             {
@@ -750,8 +1106,9 @@ void CloseWebView()
 void InitWebView(HWND hwnd)
 {
     std::wstring dataDir = GetUserDataDir();
+    if (g_viewer) dataDir = dataDir + L"\\" + VIEWER_FOLDER_NAME;   // separate from the editor's
     auto* handler = new EnvironmentCompletedHandler(hwnd);
-    HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(
+    HRESULT hr = g_createEnvironment(
         nullptr, dataDir.c_str(), nullptr, handler);
     handler->Release(); // WebView2 keeps its own reference
 
@@ -767,7 +1124,7 @@ void InitWebView(HWND hwnd)
 static bool IsWebView2Installed()
 {
     LPWSTR version = nullptr;
-    HRESULT hr = GetAvailableCoreWebView2BrowserVersionString(nullptr, &version);
+    HRESULT hr = g_getBrowserVersion(nullptr, &version);
     bool ok = SUCCEEDED(hr) && version != nullptr;
     if (version) CoTaskMemFree(version);
     return ok;
@@ -1092,10 +1449,14 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
 {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
-    // Only one copy at a time: starting the app again just brings the
-    // window that is already open to the front.
-    HANDLE instanceMutex = CreateMutexW(nullptr, TRUE, MUTEX_NAME);
-    if (GetLastError() == ERROR_ALREADY_EXISTS)
+    // (A view-only copy is not limited: any number of them may be open.)
+    std::vector<PackedFile> packedFiles;
+    std::string packedDoc;
+    PackageState package = ReadPackage(packedFiles, packedDoc);
+    g_viewer = (package != PACKAGE_NONE);
+
+    HANDLE instanceMutex = g_viewer ? nullptr : CreateMutexW(nullptr, TRUE, MUTEX_NAME);
+    if (instanceMutex && GetLastError() == ERROR_ALREADY_EXISTS)
     {
         HWND running = FindWindowW(CLASS_NAME, nullptr);
         if (running)
@@ -1104,6 +1465,36 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
             SetForegroundWindow(running);
         }
         if (instanceMutex) CloseHandle(instanceMutex);
+        return 0;
+    }
+
+    // Where flipbook.html and WebView2Loader.dll are: next to app.exe, or
+    // (view-only copy) in the folder they were just unpacked to.
+    g_pageDir = GetExeDir();
+    if (g_viewer)
+    {
+        if (package != PACKAGE_OK || !UnpackViewerFiles(packedFiles, g_pageDir))
+        {
+            MessageBoxW(nullptr,
+                L"Ten plik jest uszkodzony albo nie uda\u0142o si\u0119 przygotowa\u0107 go do uruchomienia.\n\n"
+                L"Kronika nie mo\u017ce zosta\u0107 wy\u015bwietlona.",
+                APP_TITLE, MB_OK | MB_ICONERROR);
+            return 0;
+        }
+        g_viewerDoc = FromUtf8(packedDoc);
+        packedDoc.clear();
+        packedDoc.shrink_to_fit();
+        packedFiles.clear();
+        g_closeConfirmed = true;   // nothing can be lost: closing never asks
+    }
+
+    if (!LoadWebView2Loader(g_pageDir + LOADER_DLL_NAME))
+    {
+        MessageBoxW(nullptr,
+            L"Nie uda\u0142o si\u0119 wczyta\u0107 pliku WebView2Loader.dll.\n\n"
+            L"Kronika szkolna nie mo\u017ce si\u0119 uruchomi\u0107.",
+            APP_TITLE, MB_OK | MB_ICONERROR);
+        if (instanceMutex) { ReleaseMutex(instanceMutex); CloseHandle(instanceMutex); }
         return 0;
     }
 
@@ -1122,8 +1513,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
         return 0;
     }
 
-    // Without flipbook.html there is nothing to show either.
-    if (FileMissing(GetExeDir() + L"flipbook.html"))
+    if (FileMissing(g_pageDir + L"flipbook.html"))
     {
         MessageBoxW(nullptr,
             L"Brakuje pliku flipbook.html, kt\u00f3ry musi le\u017ce\u0107 w tym samym folderze co program.\n\n"
@@ -1146,7 +1536,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     wc.cbSize = sizeof(wc);
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
-    wc.lpszClassName = CLASS_NAME;
+    wc.lpszClassName = g_viewer ? VIEWER_CLASS_NAME : CLASS_NAME;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH);
     wc.hIcon = bigIcon;
@@ -1161,7 +1551,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     int x = (screenW - WIN_W) / 2;
     int y = (screenH - WIN_H) / 2;
 
-    HWND hwnd = CreateWindowExW(exStyle, CLASS_NAME, APP_TITLE, style,
+    HWND hwnd = CreateWindowExW(exStyle, g_viewer ? VIEWER_CLASS_NAME : CLASS_NAME, APP_TITLE, style,
         x, y, WIN_W, WIN_H, nullptr, nullptr, hInstance, nullptr);
     if (!hwnd)
     {

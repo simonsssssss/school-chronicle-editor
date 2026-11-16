@@ -755,8 +755,8 @@
     gap: 8px;
   }
   .file-btn {
-    height: 32px;
-    padding: 0 12px;
+    width: 36px;
+    height: 36px;
     box-sizing: border-box;
     display: flex;
     align-items: center;
@@ -764,9 +764,7 @@
     background: #fff;
     border: 1px solid #ccc;
     border-radius: 6px;
-    color: #333;
-    font-size: 13px;
-    white-space: nowrap;
+    color: #444;
     cursor: pointer;
     user-select: none;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
@@ -2264,6 +2262,12 @@
 
   const SHOW_COVER = true;
 
+
+  // Wersja tylko do przeglądania (plik utworzony przyciskiem "Utwórz wersję
+  // tylko do przeglądania"): program otwiera wtedy stronę z "?viewer=1".
+  // Zostaje sama książka i przyciski przewracania stron.
+  const VIEWER = new URLSearchParams(window.location.search).has("viewer");
+
   // Number of inner pages the book STARTS with (pages are added/deleted
   // two at a time, so the count stays even).
   // Keep this EVEN, otherwise the back cover ends up on the wrong side
@@ -2487,6 +2491,43 @@
     return h("svg", { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
       [6, 12, 18].map((y) => h("circle", { key: y, cx: 5, cy: y, r: 1.6, fill: "currentColor", stroke: "none" })),
       h("path", { d: "M10 6H20M10 12H20M10 18H20" })
+    );
+  }
+
+  // Książka z plusem: "nowa kronika".
+  function NewDocIcon() {
+    return h("svg", { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+      h("path", { d: "M4 19.5A2.5 2.5 0 0 1 6.5 17H20V2H6.5A2.5 2.5 0 0 0 4 4.5Z" }),
+      h("path", { d: "M4 19.5A2.5 2.5 0 0 0 6.5 22H20V17" }),
+      h("path", { d: "M12 6.5V12.5M9 9.5H15" })
+    );
+  }
+
+  // Dyskietka z ołówkiem: "zapisz jako".
+  function SaveAsIcon() {
+    return h("svg", { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+      h("path", { d: "M12 21H5A2 2 0 0 1 3 19V5A2 2 0 0 1 5 3H16L21 8V10" }),
+      h("path", { d: "M7 3V8H15V3" }),
+      h("path", { d: "M7 21V13H12" }),
+      h("path", { d: "M21.2 12.3L23.7 14.8L16.5 22H14V19.5Z", fill: "currentColor", stroke: "none" })
+    );
+  }
+
+  // Otwarty folder: "otwórz".
+  function OpenFileIcon() {
+    return h("svg", { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+      h("path", { d: "M3 19V6A2 2 0 0 1 5 4H9L11 7H18A2 2 0 0 1 20 9V10" }),
+      h("path", { d: "M3 19L5.6 11.4A2 2 0 0 1 7.5 10H22L19.4 17.6A2 2 0 0 1 17.5 19H3Z" })
+    );
+  }
+
+  // Książka z okiem: "utwórz wersję tylko do przeglądania".
+  function ExportViewerIcon() {
+    return h("svg", { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
+      h("path", { d: "M4 19.5A2.5 2.5 0 0 1 6.5 17H20V2H6.5A2.5 2.5 0 0 0 4 4.5Z" }),
+      h("path", { d: "M4 19.5A2.5 2.5 0 0 0 6.5 22H20V17" }),
+      h("path", { d: "M7.6 9.5C9 7.4 10.4 6.4 12 6.4C13.6 6.4 15 7.4 16.4 9.5C15 11.6 13.6 12.6 12 12.6C10.4 12.6 9 11.6 7.6 9.5Z", strokeWidth: 1.5 }),
+      h("circle", { cx: 12, cy: 9.5, r: 1.3, fill: "currentColor", stroke: "none" })
     );
   }
 
@@ -6258,6 +6299,9 @@
     const [closeDialogOpen, setCloseDialogOpen] = useState(false);
     const closeDialogOpenRef = useRef(false);
 
+    const [newDialogOpen, setNewDialogOpen] = useState(false);
+    const newDialogOpenRef = useRef(false);
+
     const buildDoc = () => ({
       app: FILE_APP,
       version: FILE_VERSION,
@@ -6298,7 +6342,7 @@
 
     const anyDialogOpen = () => dialogOpenRef.current || imageDialogOpenRef.current
       || openDialogOpenRef.current || closeDialogOpenRef.current || dotDialogOpenRef.current
-      || layoutsDialogOpenRef.current;
+      || layoutsDialogOpenRef.current || newDialogOpenRef.current;
 
     const requestSave = () => {
       if (fileBusyRef.current || anyDialogOpen()) return;
@@ -6323,6 +6367,27 @@
       pendingSaveRef.current = { snap, isNew: !hasFileRef.current };
     };
 
+    // "Zapisz jako": zawsze pyta o miejsce i nazwę, zawsze powstaje nowy plik.
+    const requestSaveAs = () => {
+      if (fileBusyRef.current || anyDialogOpen()) return;
+      const ae = document.activeElement;
+      if (ae && ae.classList && ae.classList.contains("dim-input")) ae.blur();
+      const doc = buildDoc();
+      let sent;
+      try {
+        sent = hostPost("saveAs\n" + JSON.stringify(doc));
+      } catch (e) {
+        showToast("Nie udało się zapisać pliku: kronika jest zbyt duża");
+        return;
+      }
+      if (!sent) {
+        showToast("Zapisywanie działa tylko w\u00A0programie Kronika szkolna");
+        return;
+      }
+      fileBusyRef.current = true;
+      pendingSaveRef.current = { snap: docSnapshot(doc), isNew: true };
+    };
+
     const startOpen = () => {
       if (hostPost("open")) fileBusyRef.current = true;
       else showToast("Otwieranie działa tylko w\u00A0programie Kronika szkolna");
@@ -6343,6 +6408,15 @@
     const confirmOpen = () => {
       closeOpenDialog();
       startOpen();
+    };
+
+    // "Utwórz wersję tylko do przeglądania": program pyta o plik kroniki,
+    // strona go sprawdza ("exportCheck"), potem program pyta o miejsce zapisu
+    // i tworzy plik. Kronika na ekranie nie bierze w tym udziału.
+    const requestExport = () => {
+      if (fileBusyRef.current || anyDialogOpen()) return;
+      if (hostPost("export")) fileBusyRef.current = true;
+      else showToast("Tworzenie wersji do przeglądania działa tylko w\u00A0programie Kronika szkolna");
     };
 
     const closeCloseDialog = () => {
@@ -6389,9 +6463,54 @@
       setDirty(false);
     };
 
+    // Nowa, pusta kronika: taka sama jak po uruchomieniu programu.
+    const startNew = () => {
+      hostPost("newDoc");   // program zapomina plik poprzedniej kroniki
+      applyDocument({
+        pageKeys: Array.from({ length: INITIAL_INNER_PAGES }, (_, i) => `p${i + 1}`),
+        nextPageNum: INITIAL_INNER_PAGES + 1,
+        boxes: [], images: [], ornaments: []
+      });
+      hasFileRef.current = false;
+      setHasFile(false);
+      // Narzędzia wyrównywania wyłączone, jak po uruchomieniu.
+      setAlignOn(false);
+      setCaptionOn(false);
+      setAlignLayout(0);
+      setCustomDots([]);
+    };
+
+    // "Nowa kronika": okno z ostrzeżeniem tylko wtedy, gdy coś można stracić
+    // (to samo sprawdzenie co przy zamykaniu programu).
+    const requestNew = () => {
+      if (fileBusyRef.current || anyDialogOpen()) return;
+      if (!checkDirty()) { startNew(); return; }
+      blurEditing();
+      setColorPicker(null);
+      newDialogOpenRef.current = true;
+      setNewDialogOpen(true);
+    };
+    const closeNewDialog = () => {
+      newDialogOpenRef.current = false;
+      setNewDialogOpen(false);
+    };
+    const confirmNew = () => {
+      closeNewDialog();
+      startNew();
+    };
+
     // Odpowiedzi i polecenia od main.cpp.
     const hostHandlerRef = useRef(null);
     hostHandlerRef.current = (cmd, rest) => {
+      // Wersja tylko do przeglądania: program przysyła jedynie treść kroniki.
+      if (VIEWER) {
+        if (cmd === "viewerDoc") {
+          const doc = parseDocument(rest);
+          if (doc) applyDocument(doc);
+          else showToast("Nie udało się wczytać kroniki");
+        }
+        return;
+      }
       if (cmd === "saveShortcut") { requestSave(); return; }
 
       // Okno wyboru zapisanego układu: lista z pliku i usuwanie układu.
@@ -6500,6 +6619,35 @@
         return;
       }
 
+      // Tworzenie wersji tylko do przeglądania.
+      if (cmd === "exportCheck") {
+        // Wybrany plik jest sprawdzany tak samo jak przy otwieraniu.
+        if (parseDocument(rest)) {
+          hostPost("exportAccepted");        // program pyta teraz o miejsce zapisu
+        } else {
+          fileBusyRef.current = false;
+          hostPost("exportRejected");
+          showToast("Wybrany plik nie jest plikiem kroniki");
+        }
+        return;
+      }
+      if (cmd === "exported") {
+        fileBusyRef.current = false;
+        showToast("Utworzono wersję tylko do przeglądania");
+        return;
+      }
+      if (cmd === "exportCancelled") { fileBusyRef.current = false; return; }
+      if (cmd === "exportReadFailed") {
+        fileBusyRef.current = false;
+        showToast("Nie udało się otworzyć pliku");
+        return;
+      }
+      if (cmd === "exportFailed") {
+        fileBusyRef.current = false;
+        showToast("Nie udało się utworzyć pliku");
+        return;
+      }
+
       // Zamykanie programu: okno tylko wtedy, gdy coś można stracić.
       if (cmd === "confirmClose") {
         if (!checkDirty()) { hostPost("close"); return; }
@@ -6510,6 +6658,7 @@
         closeDeleteDialog();
         closeImageDialog();
         closeOpenDialog();
+        closeNewDialog();
         closeDotDialog();
 		closeLayoutsDialog();
         closeDialogOpenRef.current = true;
@@ -6526,6 +6675,8 @@
         hostHandlerRef.current(nl < 0 ? msg : msg.slice(0, nl), nl < 0 ? "" : msg.slice(nl + 1));
       };
       wv.addEventListener("message", onMessage);
+      // Wersja tylko do przeglądania: strona jest gotowa, prosi o swoją kronikę.
+      if (VIEWER) wv.postMessage("viewerReady");
       return () => wv.removeEventListener("message", onMessage);
     }, []);
 
@@ -7493,7 +7644,8 @@
 
         if (dialogOpenRef.current || imageDialogOpenRef.current
             || openDialogOpenRef.current || closeDialogOpenRef.current
-            || dotDialogOpenRef.current || layoutsDialogOpenRef.current) return;
+            || dotDialogOpenRef.current || layoutsDialogOpenRef.current
+            || newDialogOpenRef.current) return;
         if (toolRef.current !== TOOL_MOVE) return;
         // Pisanie w polu (np. wymiar obrazu): skróty trybu przesuwania nie działają.
         const ae = document.activeElement;
@@ -7951,7 +8103,7 @@
             ...pageKeys.map((k) => h(Surface, { key: k, ...surfaceProps(k, false) })),
             h(Surface, { key: "c2", ...surfaceProps("c2", true) })
           ),
-          h("div", { className: "toggle-row" },
+          !VIEWER && h("div", { className: "toggle-row" },
             h("div", {
               className: "toggle-btn" + (tool === TOOL_TEXT ? " active" : "") + (coverLock ? " disabled" : ""),
               "data-tip": "Dodawanie tekstu" + coverNote,
@@ -8008,7 +8160,7 @@
           ),
           // Lista wzorów na lewo od książki (tylko przy włączonym narzędziu).
           tool === TOOL_PATTERN && h(PatternPanel, { selected: selectedPattern, onSelect: selectPattern }),
-          !hideHints && h("div", { className: "hint-stack" },
+          !hideHints && !VIEWER && h("div", { className: "hint-stack" },
             alignOn && h("div", { className: "move-hint" },
               "Aby wyrównać treść na stronie, przeciągnij ją tak, żeby jej środek znalazł się blisko kropki.",
               h("br"),
@@ -8055,18 +8207,38 @@
             bookRef.current.pageFlip().flipNext();
           } }, "Następna ▶")
         ),
-        // "Zapisz" / "Otwórz" (działają też na okładkach).
-        h("div", { className: "file-row" },
-          h("div", {
-            className: "file-btn" + (hasFile && !dirty ? " disabled" : ""),
-            onMouseDown: (e) => e.preventDefault(),   // nie zabiera fokusu z tekstu
-            onClick: requestSave
-          }, "Zapisz"),
+        // Wersja tylko do przeglądania nie ma przycisków plików.
+        !VIEWER && h("div", { className: "file-row" },
           h("div", {
             className: "file-btn",
+            "data-tip": "Nowa kronika",
+            onMouseDown: (e) => e.preventDefault(),   // nie zabiera fokusu z tekstu
+            onClick: requestNew
+          }, h(NewDocIcon)),
+          h("div", {
+            className: "file-btn",
+            "data-tip": "Otwórz",
             onMouseDown: (e) => e.preventDefault(),
             onClick: requestOpen
-          }, "Otwórz")
+          }, h(OpenFileIcon)),
+          h("div", {
+            className: "file-btn" + (hasFile && !dirty ? " disabled" : ""),
+            "data-tip": "Zapisz",
+            onMouseDown: (e) => e.preventDefault(),
+            onClick: requestSave
+          }, h(SaveLayoutIcon)),
+          h("div", {
+            className: "file-btn",
+            "data-tip": "Zapisz jako",
+            onMouseDown: (e) => e.preventDefault(),
+            onClick: requestSaveAs
+          }, h(SaveAsIcon)),
+          h("div", {
+            className: "file-btn",
+            "data-tip": "Utwórz wersję tylko do przeglądania",
+            onMouseDown: (e) => e.preventDefault(),
+            onClick: requestExport
+          }, h(ExportViewerIcon))
         )
       ),
       h("div", {
@@ -8161,6 +8333,28 @@
           h("div", { className: "dialog-actions" },
             h("button", { onClick: closeCloseDialog }, "Anuluj"),
             h("button", { className: "danger", onClick: confirmCloseApp }, "Zamknij")
+          )
+        )
+      ),
+      // Ostrzeżenie przed utworzeniem nowej kroniki (tylko gdy jest coś do stracenia).
+      h("div", {
+        className: "dialog-overlay" + (newDialogOpen ? " visible" : ""),
+        onMouseDown: (e) => {
+          if (e.target === e.currentTarget) {
+            e.preventDefault();
+            closeNewDialog();
+          }
+        }
+      },
+        h("div", { className: "dialog", role: "dialog" },
+          h("div", { className: "dialog-title" }, "Utworzyć nową kronikę?"),
+          h("div", { className: "dialog-text" },
+            "Obecna kronika zostanie zastąpiona nową, pustą. Jej zawartość, która nie jest " +
+            "zapisana w\u00A0pliku, zostanie utracona i\u00A0nie będzie można jej później odzyskać."
+          ),
+          h("div", { className: "dialog-actions" },
+            h("button", { onClick: closeNewDialog }, "Anuluj"),
+            h("button", { className: "danger", onClick: confirmNew }, "Utwórz nową")
           )
         )
       ),
