@@ -243,9 +243,7 @@ static HRESULT QueryOwnInterface(T* self, const IID& own, REFIID riid, void** pp
 const wchar_t FILE_FILTER_NAME[] = L"Kronika szkolna (*.kronika)";
 const wchar_t FILE_FILTER_SPEC[] = L"*.kronika";
 
-// All saved custom point layouts: one file in the user's data folder
-// (next to app.exe isn't always writable, see GetUserDataDir).
-const wchar_t LAYOUTS_FILE_NAME[]     = L"point-layouts.json";
+const wchar_t LAYOUTS_FILE_NAME[]     = L"uklady-punktow.json";
 // Name used by earlier versions, when the file lay next to app.exe.
 const wchar_t OLD_LAYOUTS_FILE_NAME[] = L"uklady-punktow.json";
 
