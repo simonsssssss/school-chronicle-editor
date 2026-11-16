@@ -12,6 +12,7 @@
     font-style: normal;
   }
   html, body {
+    touch-action: pan-x pan-y;   /* dotyk: bez powiększania dwoma palcami */
     margin: 0;
     width: 100%;
     height: 100%;
@@ -3197,7 +3198,7 @@
         ];
       }),
       props.boxes.map((box) => {
-        const commitFontSize = (input) => {
+        const commitFontSize = (input, fallback) => {
           if (input.value === input.dataset.startValue) return; // nothing changed
 
           const boxEl = props.boxRefs.current[box.id];
@@ -3215,10 +3216,27 @@
           }
           val = Math.max(1, Math.min(70, val));
 
+          // Stan sprzed zmiany. Gdyby tekst nie mieścił się na stronie nawet
+          // przy rozmiarze 1, zmiana jest cofana w całości.
+          const beforeHtml = boxEl.innerHTML;
+          const beforeStart = offsetIn(boxEl, saved.range.startContainer, saved.range.startOffset);
+          const beforeEnd = offsetIn(boxEl, saved.range.endContainer, saved.range.endOffset);
+          const backTo = input.dataset.startValue !== undefined ? input.dataset.startValue : fallback;
+          const undoResize = () => {
+            boxEl.innerHTML = beforeHtml;
+            keepAnchored(boxEl);
+            const r = rangeFromOffsets(boxEl, beforeStart, beforeEnd);
+            props.savedRangeRef.current = { boxId: box.id, range: r };
+            setFragmentHighlight(r.collapsed ? null : r);
+            if (backTo !== undefined) input.value = backTo;
+            input.dataset.startValue = input.value;
+          };
+
           // Caret only: the new size applies to what gets typed next.
           if (saved.range.collapsed) {
             const span = insertPendingSpan(boxEl, saved.range);
             val = fitSpanFontSize(boxEl, span, val);
+			if (!fitsInPage(boxEl)) { undoResize(); return; }
             input.value = val;
             // Caret into the innermost text of the span (it may hold a pending
             // bold / italic / font / color inside it).
@@ -3263,6 +3281,7 @@
           }
 
           val = fitSpanFontSize(boxEl, span, val);
+          if (!fitsInPage(boxEl)) { undoResize(); return; }
           input.value = val;
 
           const r = document.createRange();
@@ -3285,7 +3304,7 @@
           input.value = Math.max(1, Math.min(70, cur + delta));
 
           delete input.dataset.startValue; // force commitFontSize to apply it
-          commitFontSize(input);
+          commitFontSize(input, cur);
 
           // The resize rebuilt the DOM; put the selection/caret back so the
           // next arrow click (or keystroke) hits the same spot.
@@ -4677,7 +4696,7 @@
     const cd = e.clipboardData;
     if (!cd) return;
     const internal = cd.getData(CLIP_TYPE);
-    insertAtCaret(box, internal ? htmlFragment(internal) : plainTextFragment(cd.getData("text/plain")));
+    insertAtCaret(box, internal ? htmlFragment(sanitizeBoxHtml(internal)) : plainTextFragment(cd.getData("text/plain")));
   }
 
   // Text being dragged out of one of our text boxes (null otherwise).
@@ -6383,7 +6402,12 @@
         layoutOpRef.current = null;
         if (cmd === "layoutsData") {
           const list = parseLayouts(rest);
-          if (!list) { showToast("Nie udało się wczytać układów punktów"); return; }
+          if (!list) {
+            // Plik nie jest plikiem układów: program go odkłada i zaczyna od pustej listy.
+            hostPost("layoutsSetAside");
+            showToast("Plik z\u00A0układami punktów był uszkodzony. Lista układów jest teraz pusta.");
+            return;
+          }
           if (anyDialogOpen()) return;       // w międzyczasie otworzyło się inne okno
           blurEditing();
           setSavedLayouts(list);
@@ -6405,12 +6429,12 @@
       // Zapis niestandardowego układu kropek (plik obok app.exe).
       if (cmd === "layoutsData") {
         const entry = pendingLayoutRef.current;
-        const list = entry ? parseLayouts(rest) : null;
-        if (!entry || !list) {
-          layoutBusyRef.current = false;
-          pendingLayoutRef.current = null;
-          if (entry) showToast("Nie udało się zapisać układu punktów");
-          return;
+        if (!entry) { layoutBusyRef.current = false; return; }
+        let list = parseLayouts(rest);
+        if (!list) {
+          // Uszkodzony plik: program go odkłada, nowy układ trafia do pustej listy.
+          hostPost("layoutsSetAside");
+          list = [];
         }
         // Dwa zapisy w tej samej sekundzie miałyby tę samą nazwę.
         if (list.some((l) => l.name === entry.name)) {
@@ -6604,24 +6628,25 @@
       });
     };
 
-    // ---- Dragging and resizing ---------------------------------------------
-    // While the mouse button is held, only the element being moved / resized
-    // is changed on screen; React state is updated once, on release. This
-    // way the whole book isn't re-rendered on every mouse move.
-
-    // Listen for mouse / touch moves until the button is released.
     const trackPointer = (onMove, onUp) => {
-      const up = () => {
-        document.removeEventListener("mousemove", onMove, true);
+      function up() {
+        document.removeEventListener("mousemove", move, true);
         document.removeEventListener("mouseup", up, true);
-        document.removeEventListener("touchmove", onMove, true);
+        document.removeEventListener("touchmove", move, true);
         document.removeEventListener("touchend", up, true);
+        window.removeEventListener("blur", up);
         onUp();
-      };
-      document.addEventListener("mousemove", onMove, true);
+      }
+      function move(ev) {
+        // Przycisk puszczony poza oknem (np. po Alt+Tab): koniec przeciągania.
+        if (!ev.touches && ev.buttons === 0) { up(); return; }
+        onMove(ev);
+      }
+      document.addEventListener("mousemove", move, true);
       document.addEventListener("mouseup", up, true);
-      document.addEventListener("touchmove", onMove, true);
+      document.addEventListener("touchmove", move, true);
       document.addEventListener("touchend", up, true);
+      window.addEventListener("blur", up);   // okno straciło fokus w trakcie
     };
 
     // Start dragging an existing box from a given viewport point. Only
@@ -7741,7 +7766,10 @@
 
         e.preventDefault();
         const pageEl = e.target.closest(".page, .page-cover");
-        if (pageEl) createBoxOnPage(pageEl, point.clientX, point.clientY);
+        // Na okładkach nie da się pisać (także w trakcie przewracania na okładkę).
+        if (pageEl && !pageEl.classList.contains("page-cover")) {
+          createBoxOnPage(pageEl, point.clientX, point.clientY);
+        }
       };
 
       const handleMouseMove = (e) => {
@@ -7777,11 +7805,16 @@
         const r = book.getBoundingClientRect();
         flipDirRef.current = p.clientX >= r.left + r.width / 2 ? "next" : "prev";
       };
+      // Zagięcie rogu pojawia się już po najechaniu myszką, więc kierunek
+      // jest znany także bez kliknięcia.
+      const onHover = (e) => { if (!e.buttons) onDown(e); };
       wrap.addEventListener("mousedown", onDown, true);
       wrap.addEventListener("touchstart", onDown, true);
+      wrap.addEventListener("mousemove", onHover, true);
       return () => {
         wrap.removeEventListener("mousedown", onDown, true);
         wrap.removeEventListener("touchstart", onDown, true);
+        wrap.removeEventListener("mousemove", onHover, true);
       };
     }, []);
     // size: "fixed" locks the geometry in at mount, so a resize has to remount
@@ -7820,6 +7853,12 @@
       savedRangeRef.current = null;
       setFragmentHighlight(null);
     }, [page]);
+    // Okładka: włączone narzędzie wyłącza się samo (na okładce nie da się go
+    // wyłączyć przyciskiem, a przy włączonym nie działa przewracanie myszką).
+    useEffect(() => {
+      const onCover = page === 0 || page > pageKeys.length;
+      if (onCover && toolRef.current !== TOOL_NONE) selectTool(toolRef.current);
+    }, [page, pageKeys.length]);
     const boxesFor = (pageKey) => boxes.filter((b) => b.page === pageKey);
     const imagesFor = (pageKey) => images.filter((im) => im.page === pageKey);
     const ornamentsFor = (pageKey) => ornaments.filter((o) => o.page === pageKey);

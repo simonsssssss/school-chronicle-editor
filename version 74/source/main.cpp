@@ -214,11 +214,50 @@ static const CLSID CLSID_FileSaveDialog_ = {0xC0B4E2F3, 0xBA21, 0x4773, {0x8D, 0
 static const IID   IID_IFileOpenDialog_  = {0xD57C7288, 0xD4AD, 0x4768, {0xBE, 0x02, 0x9D, 0x96, 0x95, 0x32, 0xD9, 0x60}};
 static const IID   IID_IFileSaveDialog_  = {0x84BCCD23, 0x5FDE, 0x4CDB, {0xAE, 0xA4, 0xAF, 0x64, 0xB8, 0x3D, 0x78, 0xAB}};
 
+// WebView2 callback interfaces implemented below (see QueryInterface).
+static const IID IID_EnvironmentCompletedHandler_ = {0x4E8A3389, 0xC9D8, 0x4BD2, {0xB6, 0xB5, 0x12, 0x4F, 0xEE, 0x6C, 0xC1, 0x4D}};
+static const IID IID_ControllerCompletedHandler_  = {0x6C4819F3, 0xC9B7, 0x4260, {0x81, 0x27, 0xC9, 0xF5, 0xBD, 0xE7, 0xF6, 0x8C}};
+static const IID IID_WebMessageReceivedHandler_   = {0x57213F19, 0x00E6, 0x49FA, {0x8E, 0x07, 0x89, 0x8E, 0xA0, 0x1E, 0xCB, 0xD2}};
+static const IID IID_NavigationStartingHandler_   = {0x9ADBE429, 0xF36D, 0x432B, {0x9D, 0xDC, 0xF8, 0x88, 0x1F, 0xBD, 0x76, 0xE3}};
+static const IID IID_NewWindowRequestedHandler_   = {0xD4C185FE, 0xC81C, 0x4989, {0x97, 0xAF, 0x2D, 0x3F, 0xA7, 0xAB, 0x56, 0x51}};
+static const IID IID_AcceleratorKeyHandler_       = {0xB29C7E28, 0xFA79, 0x41A8, {0x8E, 0x44, 0x65, 0x81, 0x1C, 0x76, 0xDC, 0xB2}};
+static const IID IID_ProcessFailedHandler_        = {0x79E0AEA4, 0x990B, 0x42D9, {0xAA, 0x1D, 0x0F, 0xCC, 0x2E, 0x5B, 0xC7, 0xF1}};
+
+// Only IUnknown and the object's own interface are supported.
+template <typename T>
+static HRESULT QueryOwnInterface(T* self, const IID& own, REFIID riid, void** ppv)
+{
+    if (!ppv) return E_POINTER;
+    if (!IsEqualIID(riid, IID_IUnknown) && !IsEqualIID(riid, own))
+    {
+        *ppv = nullptr;
+        return E_NOINTERFACE;
+    }
+    *ppv = self;
+    self->AddRef();
+    return S_OK;
+}
+
 const wchar_t FILE_FILTER_NAME[] = L"Kronika szkolna (*.kronika)";
 const wchar_t FILE_FILTER_SPEC[] = L"*.kronika";
 
-// Wszystkie zapisane niestandardowe układy punktów: jeden plik obok app.exe.
-const wchar_t LAYOUTS_FILE_NAME[] = L"uklady-punktow.json";
+// All saved custom point layouts: one file in the user's data folder
+// (next to app.exe isn't always writable, see GetUserDataDir).
+const wchar_t LAYOUTS_FILE_NAME[]     = L"point-layouts.json";
+// Name used by earlier versions, when the file lay next to app.exe.
+const wchar_t OLD_LAYOUTS_FILE_NAME[] = L"uklady-punktow.json";
+
+static std::wstring GetLayoutsPath()
+{
+    return GetUserDataDir() + L"\\" + LAYOUTS_FILE_NAME;
+}
+
+static bool FileMissing(const std::wstring& path)
+{
+    if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) return false;
+    DWORD err = GetLastError();
+    return err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND;
+}
 
 static bool ResultPath(IFileDialog* dlg, std::wstring& out)
 {
@@ -345,7 +384,21 @@ static void ProcessPageMessages(HWND hwnd)
             // Not a file yet: ask where. Already a file: just write the changes.
             std::wstring path = g_filePath;
             if (path.empty() && !PickSavePath(hwnd, path)) { PostToPage(L"saveCancelled"); continue; }
-            if (WriteUtf8FileSafely(path, rest))
+            bool ok = WriteUtf8FileSafely(path, rest);
+
+            // The known file can't be written any more (USB stick removed,
+            // read-only file...): let the user choose another place.
+            if (!ok && !g_filePath.empty())
+            {
+                MessageBoxW(hwnd,
+                    L"Nie uda\u0142o si\u0119 zapisa\u0107 pliku w dotychczasowym miejscu.\n\n"
+                    L"Wybierz inne miejsce zapisu.",
+                    APP_TITLE, MB_OK | MB_ICONWARNING);
+                if (!PickSavePath(hwnd, path)) { PostToPage(L"saveCancelled"); continue; }
+                ok = WriteUtf8FileSafely(path, rest);
+            }
+
+            if (ok)
             {
                 g_filePath = path;
                 PostToPage(L"saved");
@@ -372,23 +425,32 @@ static void ProcessPageMessages(HWND hwnd)
         {
             g_pendingOpenPath.clear();
         }
-        else if (cmd == L"layoutsRead")    // treść pliku z układami punktów
+        else if (cmd == L"layoutsRead")    // content of the layouts file
         {
-            std::wstring path = GetExeDir() + LAYOUTS_FILE_NAME, content;
-            DWORD attrs = GetFileAttributesW(path.c_str());
-            DWORD err = GetLastError();
-            if (attrs == INVALID_FILE_ATTRIBUTES &&
-                (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND))
-                PostToPage(L"layoutsData\n");              // pliku jeszcze nie ma: pusta lista
+            std::wstring path = GetLayoutsPath(), content;
+            // No new file yet: take the layouts saved by an earlier version.
+            if (FileMissing(path)) path = GetExeDir() + OLD_LAYOUTS_FILE_NAME;
+
+            if (FileMissing(path))
+                PostToPage(L"layoutsData\n");              // no file yet: empty list
             else if (ReadUtf8File(path, content))
                 PostToPage(L"layoutsData\n" + content);
             else
                 PostToPage(L"layoutsReadFailed");
         }
-        else if (cmd == L"layoutsWrite")   // cały plik z układami, już z nowym układem
+        else if (cmd == L"layoutsWrite")   // the whole layouts file, already changed
         {
-            PostToPage(WriteUtf8FileSafely(GetExeDir() + LAYOUTS_FILE_NAME, rest)
+            PostToPage(WriteUtf8FileSafely(GetLayoutsPath(), rest)
                        ? L"layoutsWritten" : L"layoutsWriteFailed");
+        }
+        else if (cmd == L"layoutsSetAside")   // the file isn't a layouts file
+        {
+            // Keep it under another name and start again from an empty list.
+            std::wstring path = GetLayoutsPath();
+            if (FileMissing(path)) path = GetExeDir() + OLD_LAYOUTS_FILE_NAME;
+            if (!FileMissing(path))
+                MoveFileExW(path.c_str(), (path + L".bad").c_str(), MOVEFILE_REPLACE_EXISTING);
+            WriteUtf8FileSafely(GetLayoutsPath(), L"");   // empty file = empty list
         }
         else if (cmd == L"closeAsked")     // the page shows its closing window
         {
@@ -412,16 +474,14 @@ template <typename TInterface, typename TSender, typename TArgs>
 class CallbackHandler : public TInterface
 {
     LONG m_refCount = 1;
+    const IID& m_iid;
     void (*m_fn)(TArgs*);
 public:
-    explicit CallbackHandler(void (*fn)(TArgs*)) : m_fn(fn) {}
+    CallbackHandler(const IID& iid, void (*fn)(TArgs*)) : m_iid(iid), m_fn(fn) {}
 
-    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, void** ppv) override
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override
     {
-        if (!ppv) return E_POINTER;
-        *ppv = static_cast<TInterface*>(this);
-        AddRef();
-        return S_OK;
+        return QueryOwnInterface(static_cast<TInterface*>(this), m_iid, riid, ppv);
     }
     ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&m_refCount); }
     ULONG STDMETHODCALLTYPE Release() override
@@ -551,12 +611,11 @@ class ControllerCompletedHandler : public ICoreWebView2CreateCoreWebView2Control
 public:
     explicit ControllerCompletedHandler(HWND hwnd) : m_hwnd(hwnd) {}
 
-    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, void** ppv) override
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override
     {
-        if (!ppv) return E_POINTER;
-        *ppv = static_cast<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler*>(this);
-        AddRef();
-        return S_OK;
+        return QueryOwnInterface(
+            static_cast<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler*>(this),
+            IID_ControllerCompletedHandler_, riid, ppv);
     }
     ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&m_refCount); }
     ULONG STDMETHODCALLTYPE Release() override
@@ -593,31 +652,26 @@ public:
 
             EventRegistrationToken token;
 
-            // Browser shortcuts (see ShouldBlockKey).
             auto* keyHandler = new CallbackHandler<ICoreWebView2AcceleratorKeyPressedEventHandler,
-                ICoreWebView2Controller, ICoreWebView2AcceleratorKeyPressedEventArgs>(OnAcceleratorKeyPressed);
+                ICoreWebView2Controller, ICoreWebView2AcceleratorKeyPressedEventArgs>(IID_AcceleratorKeyHandler_, OnAcceleratorKeyPressed);
             g_webviewController->add_AcceleratorKeyPressed(keyHandler, &token);
             keyHandler->Release(); // WebView2 keeps its own reference
 
-            // Never leave flipbook.html.
             auto* navHandler = new CallbackHandler<ICoreWebView2NavigationStartingEventHandler,
-                ICoreWebView2, ICoreWebView2NavigationStartingEventArgs>(OnNavigationStarting);
+                ICoreWebView2, ICoreWebView2NavigationStartingEventArgs>(IID_NavigationStartingHandler_, OnNavigationStarting);
             g_webview->add_NavigationStarting(navHandler, &token);
             navHandler->Release();
 
-            // Never open other windows.
             auto* popupHandler = new CallbackHandler<ICoreWebView2NewWindowRequestedEventHandler,
-                ICoreWebView2, ICoreWebView2NewWindowRequestedEventArgs>(OnNewWindowRequested);
+                ICoreWebView2, ICoreWebView2NewWindowRequestedEventArgs>(IID_NewWindowRequestedHandler_, OnNewWindowRequested);
             g_webview->add_NewWindowRequested(popupHandler, &token);
             popupHandler->Release();
-            // Messages from the page (saving, opening, closing).
             auto* msgHandler = new CallbackHandler<ICoreWebView2WebMessageReceivedEventHandler,
-                ICoreWebView2, ICoreWebView2WebMessageReceivedEventArgs>(OnWebMessageReceived);
+                ICoreWebView2, ICoreWebView2WebMessageReceivedEventArgs>(IID_WebMessageReceivedHandler_, OnWebMessageReceived);
             g_webview->add_WebMessageReceived(msgHandler, &token);
             msgHandler->Release();
-            // The page crashed (see OnProcessFailed).
             auto* failHandler = new CallbackHandler<ICoreWebView2ProcessFailedEventHandler,
-                ICoreWebView2, ICoreWebView2ProcessFailedEventArgs>(OnProcessFailed);
+                ICoreWebView2, ICoreWebView2ProcessFailedEventArgs>(IID_ProcessFailedHandler_, OnProcessFailed);
             g_webview->add_ProcessFailed(failHandler, &token);
             failHandler->Release();
             std::wstring htmlUrl = ToFileUrl(GetExeDir() + L"flipbook.html");
@@ -641,12 +695,11 @@ class EnvironmentCompletedHandler : public ICoreWebView2CreateCoreWebView2Enviro
 public:
     explicit EnvironmentCompletedHandler(HWND hwnd) : m_hwnd(hwnd) {}
 
-    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, void** ppv) override
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override
     {
-        if (!ppv) return E_POINTER;
-        *ppv = static_cast<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler*>(this);
-        AddRef();
-        return S_OK;
+        return QueryOwnInterface(
+            static_cast<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler*>(this),
+            IID_EnvironmentCompletedHandler_, riid, ppv);
     }
     ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&m_refCount); }
     ULONG STDMETHODCALLTYPE Release() override
@@ -665,7 +718,9 @@ public:
             MessageBoxW(m_hwnd, buf, L"WebView2 error", MB_OK | MB_ICONERROR);
             return S_OK;
         }
-        env->CreateCoreWebView2Controller(m_hwnd, new ControllerCompletedHandler(m_hwnd));
+        auto* handler = new ControllerCompletedHandler(m_hwnd);
+        env->CreateCoreWebView2Controller(m_hwnd, handler);
+        handler->Release(); // WebView2 keeps its own reference
         return S_OK;
     }
 };
@@ -695,9 +750,10 @@ void CloseWebView()
 void InitWebView(HWND hwnd)
 {
     std::wstring dataDir = GetUserDataDir();
+    auto* handler = new EnvironmentCompletedHandler(hwnd);
     HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(
-        nullptr, dataDir.c_str(), nullptr,
-        new EnvironmentCompletedHandler(hwnd));
+        nullptr, dataDir.c_str(), nullptr, handler);
+    handler->Release(); // WebView2 keeps its own reference
 
     if (FAILED(hr))
     {
@@ -816,6 +872,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         InvalidateRect(hwnd, nullptr, TRUE); // the caption buttons move with the right edge
         break;
 
+    // The window moved: WebView2 must know, or its pop-ups (e.g. the font
+    // list) open in the old place.
+    case WM_MOVE:
+        if (g_webviewController) g_webviewController->NotifyParentWindowPositionChanged();
+        break;
+
     // The window moved to a monitor with a different scaling (e.g. with
     // Win+Shift+Arrow): take the size Windows suggests for it, then redo
     // everything that depends on the scale.
@@ -929,12 +991,22 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
     case WM_TIMER:
     {   
-		if (wParam == TIMER_CLOSE_WAIT)
+        if (wParam == TIMER_CLOSE_WAIT)
         {
-            // The page didn't answer (still loading, or failed to start):
-            // close only if it last said there is nothing to lose.
+            // The page didn't answer (still loading, failed to start, or hung).
             KillTimer(hwnd, TIMER_CLOSE_WAIT);
-            if (!g_dirty) { g_closeConfirmed = true; StartFadeOut(hwnd); }
+            if (g_dirty)
+            {
+                // There is something to lose: only the user may decide.
+                int answer = MessageBoxW(hwnd,
+                    L"Program nie odpowiada.\n\n"
+                    L"Zamkn\u0105\u0107 go mimo to? Niezapisane zmiany zostan\u0105 utracone.",
+                    APP_TITLE, MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
+                if (g_closeConfirmed) return 0;   // the page answered meanwhile
+                if (answer != IDYES) return 0;
+            }
+            g_closeConfirmed = true;
+            StartFadeOut(hwnd);
             return 0;
         }
         if (wParam == TIMER_FADE_IN)
@@ -1046,6 +1118,17 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
             APP_TITLE, MB_YESNO | MB_ICONERROR);
         if (answer == IDYES)
             ShellExecuteW(nullptr, L"open", WEBVIEW2_DOWNLOAD_URL, nullptr, nullptr, SW_SHOWNORMAL);
+        if (instanceMutex) { ReleaseMutex(instanceMutex); CloseHandle(instanceMutex); }
+        return 0;
+    }
+
+    // Without flipbook.html there is nothing to show either.
+    if (FileMissing(GetExeDir() + L"flipbook.html"))
+    {
+        MessageBoxW(nullptr,
+            L"Brakuje pliku flipbook.html, kt\u00f3ry musi le\u017ce\u0107 w tym samym folderze co program.\n\n"
+            L"Kronika szkolna nie mo\u017ce si\u0119 uruchomi\u0107.",
+            APP_TITLE, MB_OK | MB_ICONERROR);
         if (instanceMutex) { ReleaseMutex(instanceMutex); CloseHandle(instanceMutex); }
         return 0;
     }
