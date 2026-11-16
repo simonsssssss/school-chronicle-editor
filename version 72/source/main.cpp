@@ -217,6 +217,9 @@ static const IID   IID_IFileSaveDialog_  = {0x84BCCD23, 0x5FDE, 0x4CDB, {0xAE, 0
 const wchar_t FILE_FILTER_NAME[] = L"Kronika szkolna (*.kronika)";
 const wchar_t FILE_FILTER_SPEC[] = L"*.kronika";
 
+// Wszystkie zapisane niestandardowe układy punktów: jeden plik obok app.exe.
+const wchar_t LAYOUTS_FILE_NAME[] = L"uklady-punktow.json";
+
 static bool ResultPath(IFileDialog* dlg, std::wstring& out)
 {
     ComPtr<IShellItem> item;
@@ -368,6 +371,24 @@ static void ProcessPageMessages(HWND hwnd)
         else if (cmd == L"openRejected")   // not a chronicle file: keep the old path
         {
             g_pendingOpenPath.clear();
+        }
+        else if (cmd == L"layoutsRead")    // treść pliku z układami punktów
+        {
+            std::wstring path = GetExeDir() + LAYOUTS_FILE_NAME, content;
+            DWORD attrs = GetFileAttributesW(path.c_str());
+            DWORD err = GetLastError();
+            if (attrs == INVALID_FILE_ATTRIBUTES &&
+                (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND))
+                PostToPage(L"layoutsData\n");              // pliku jeszcze nie ma: pusta lista
+            else if (ReadUtf8File(path, content))
+                PostToPage(L"layoutsData\n" + content);
+            else
+                PostToPage(L"layoutsReadFailed");
+        }
+        else if (cmd == L"layoutsWrite")   // cały plik z układami, już z nowym układem
+        {
+            PostToPage(WriteUtf8FileSafely(GetExeDir() + LAYOUTS_FILE_NAME, rest)
+                       ? L"layoutsWritten" : L"layoutsWriteFailed");
         }
         else if (cmd == L"closeAsked")     // the page shows its closing window
         {
