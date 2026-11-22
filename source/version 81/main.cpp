@@ -359,9 +359,35 @@ static bool WriteUtf8FileSafely(const std::wstring& path, const std::wstring& te
     return ok;
 }
 
+// ---- View-only copy -----------------------------------------------------------
+// "Export" makes a copy of app.exe with a package glued to its end: the files
+// the page needs (flipbook.html, lib, fonts, WebView2Loader.dll) and one
+// chronicle. A copy that finds such a package at its own end starts as a
+// viewer: it unpacks those files, shows that chronicle and offers no tools.
+//
+// Package: entries [name length, 4 bytes][data length, 4 bytes][name][data],
+// then [size of all entries, 8 bytes][PACKAGE_MAGIC, 8 bytes].
+
+const char PACKAGE_MAGIC[]         = "KRONIKA1";   // exactly 8 characters
+const char PACKAGE_DOC_NAME[]      = "kronika";    // the chronicle (never written to disk)
+const wchar_t VIEWER_FOLDER_NAME[] = L"Podglad";
+const wchar_t VIEWER_CLASS_NAME[]  = L"KronikaSzkolnaViewerWindow";
+const wchar_t LOADER_DLL_NAME[]    = L"WebView2Loader.dll";
+
+bool g_viewer = false;          // this copy only shows its own chronicle
+std::wstring g_pageDir;         // folder of flipbook.html, with a trailing backslash
+std::wstring g_viewerDoc;       // viewer: the chronicle, until the page asks for it
+std::wstring g_exportSource;    // export: the chosen .kronika file...
+std::wstring g_exportContent;   // ...and its content, until the page has checked it
+
+struct PackedFile { std::string name; std::string data; };
+enum PackageState { PACKAGE_NONE, PACKAGE_OK, PACKAGE_BAD };
+
 // ---- Ustawienia programu (powiększenie książki) -------------------------------
 // Jeden plik w folderze danych użytkownika, wspólny dla wszystkich kronik.
 // Zostaje po zamknięciu programu i po ponownym uruchomieniu komputera.
+// Wersja tylko do przeglądania ma swój własny plik (w folderze "Podglad"),
+// więc nie zmienia powiększenia zwykłego programu.
 const wchar_t SETTINGS_FILE_NAME[] = L"ustawienia.json";
 const int ZOOM_MIN = 10;        // te same granice co suwak w flipbook.html
 const int ZOOM_MAX = 400;
@@ -369,7 +395,13 @@ const int ZOOM_DEFAULT = 100;
 
 static std::wstring GetSettingsPath()
 {
-    return GetUserDataDir() + L"\\" + SETTINGS_FILE_NAME;
+    std::wstring dir = GetUserDataDir();
+    if (g_viewer)
+    {
+        dir = dir + L"\\" + VIEWER_FOLDER_NAME;
+        CreateDirectoryW(dir.c_str(), nullptr);   // fine if it already exists
+    }
+    return dir + L"\\" + SETTINGS_FILE_NAME;
 }
 
 // Liczba całkowita z tekstu (same cyfry), albo -1.
@@ -408,30 +440,6 @@ static void SaveZoom(int zoom)
     wsprintfW(text, L"{\n  \"zoom\": %d\n}\n", zoom);
     WriteUtf8FileSafely(GetSettingsPath(), text);
 }
-
-// ---- View-only copy -----------------------------------------------------------
-// "Export" makes a copy of app.exe with a package glued to its end: the files
-// the page needs (flipbook.html, lib, fonts, WebView2Loader.dll) and one
-// chronicle. A copy that finds such a package at its own end starts as a
-// viewer: it unpacks those files, shows that chronicle and offers no tools.
-//
-// Package: entries [name length, 4 bytes][data length, 4 bytes][name][data],
-// then [size of all entries, 8 bytes][PACKAGE_MAGIC, 8 bytes].
-
-const char PACKAGE_MAGIC[]         = "KRONIKA1";   // exactly 8 characters
-const char PACKAGE_DOC_NAME[]      = "kronika";    // the chronicle (never written to disk)
-const wchar_t VIEWER_FOLDER_NAME[] = L"Podglad";
-const wchar_t VIEWER_CLASS_NAME[]  = L"KronikaSzkolnaViewerWindow";
-const wchar_t LOADER_DLL_NAME[]    = L"WebView2Loader.dll";
-
-bool g_viewer = false;          // this copy only shows its own chronicle
-std::wstring g_pageDir;         // folder of flipbook.html, with a trailing backslash
-std::wstring g_viewerDoc;       // viewer: the chronicle, until the page asks for it
-std::wstring g_exportSource;    // export: the chosen .kronika file...
-std::wstring g_exportContent;   // ...and its content, until the page has checked it
-
-struct PackedFile { std::string name; std::string data; };
-enum PackageState { PACKAGE_NONE, PACKAGE_OK, PACKAGE_BAD };
 
 // WebView2Loader.dll is loaded by hand, not listed among the DLLs Windows
 // needs to start app.exe: a view-only copy has it inside itself, so at start
@@ -790,6 +798,10 @@ static void ProcessPageMessages(HWND hwnd)
                 g_viewerDoc.clear();
                 g_viewerDoc.shrink_to_fit();
             }
+            else if (cmd == L"zoomSave")   // powiększenie książki (własny plik ustawień)
+            {
+                SaveZoom(ParseZoomNumber(rest, 0));
+            }
             continue;
         }
         if (cmd == L"dirty")
@@ -1137,17 +1149,11 @@ public:
             g_webview->add_ProcessFailed(failHandler, &token);
             failHandler->Release();
             std::wstring htmlUrl = ToFileUrl(g_pageDir + L"flipbook.html");
-            if (g_viewer)
-            {
-                htmlUrl += L"?viewer=1";   // the page shows the book only
-            }
-            else
-            {
-                // Zapamiętane powiększenie: strona od razu startuje w tym rozmiarze.
-                wchar_t zoomArg[32];
-                wsprintfW(zoomArg, L"?zoom=%d", LoadSavedZoom());
-                htmlUrl += zoomArg;
-            }
+            // Zapamiętane powiększenie: strona od razu startuje w tym rozmiarze.
+            // Wersja tylko do przeglądania: sama książka (i suwak powiększenia).
+            wchar_t zoomArg[48];
+            wsprintfW(zoomArg, g_viewer ? L"?viewer=1&zoom=%d" : L"?zoom=%d", LoadSavedZoom());
+            htmlUrl += zoomArg;
             HRESULT navHr = g_webview->Navigate(htmlUrl.c_str());
             if (FAILED(navHr))
             {

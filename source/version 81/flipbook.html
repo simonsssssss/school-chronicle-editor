@@ -1157,6 +1157,48 @@
   }
   .zoom-value:hover { border-color: #aaa; }
   .zoom-value:focus { border-color: #0078d7; }
+  /* Wersja tylko do przeglądania: suwak poziomy (po lewej 10%, po prawej
+     400%), w wierszu pod książką, tam gdzie w zwykłej wersji są przyciski
+     plików. Wartość jest nad uchwytem i jedzie razem z nim. */
+  .zoom-control.horizontal {
+    position: relative;
+    right: auto;
+    bottom: auto;
+    margin: 0;
+    grid-column: 3;
+    grid-row: 1;
+    justify-self: end;
+  }
+  .zoom-control.horizontal .zoom-end {
+    top: auto;
+    right: auto;
+    bottom: 5px;
+    width: 40px;
+    margin-left: -20px;
+  }
+  .zoom-control.horizontal .zoom-track {
+    height: 4px;
+    margin-left: 0;
+    margin-top: -2px;
+  }
+  .zoom-control.horizontal .zoom-mid {
+    width: 1px;
+    height: 14px;
+    margin-left: 0;
+    margin-top: -7px;
+  }
+  .zoom-control.horizontal .zoom-hit {
+    top: 0;
+    bottom: 0;
+    right: auto;
+  }
+  .zoom-control.horizontal .zoom-value {
+    right: auto;
+    bottom: 100%;
+    margin: 0 0 6px -24px;
+  }
+  /* Miejsce na pole z wartością nad poziomym suwakiem (patrz VIEWER_ZOOM_ROOM). */
+  .controls.viewer-controls { margin-top: 32px; }
   /* Podczas przeciągania uchwytu wszędzie ten sam kursor. */
   html.zoom-dragging, html.zoom-dragging * { cursor: pointer !important; }
 </style>
@@ -1340,6 +1382,9 @@
   const MARGIN_X = 48;         // breathing room left+right of the spread
   const MARGIN_Y = 32;         // breathing room top+bottom
   const CONTROLS_H = 60;       // buttons row + its margin
+  // Wersja tylko do przeglądania: wiersz pod książką jest o tyle niżej, żeby
+  // pole z wartością nad uchwytem poziomego suwaka nie zachodziło na książkę.
+  const VIEWER_ZOOM_ROOM = 16;
   // Miejsce po każdej stronie książki: po prawej kolumna przycisków
   // i notki (10 px odstępu + 190 px notki + zapas), po lewej tyle samo,
   // żeby książka stała na środku.
@@ -2554,7 +2599,8 @@
     // Wersja tylko do przeglądania nie ma przycisków ani notek obok książki.
     const sideW = VIEWER ? MARGIN_X : Math.max(MARGIN_X, 2 * SIDE_ROOM);
     const availW = Math.max(window.innerWidth - sideW, MIN_PAGE_W * 2);
-    const availH = Math.max(window.innerHeight - MARGIN_Y - CONTROLS_H, MIN_PAGE_W * PAGE_RATIO);
+    const controlsH = CONTROLS_H + (VIEWER ? VIEWER_ZOOM_ROOM : 0);
+    const availH = Math.max(window.innerHeight - MARGIN_Y - controlsH, MIN_PAGE_W * PAGE_RATIO);
 
     let w = Math.floor(availW / 2);
     if (Math.floor(w * PAGE_RATIO) > availH) w = Math.floor(availH / PAGE_RATIO);
@@ -2572,7 +2618,7 @@
   // Powiększenie zapamiętane przez program (main.cpp czyta je z pliku
   // ustawień i podaje w adresie strony: "?zoom=150"). Jedno dla całego
   // programu, niezależnie od otwartej kroniki. Wersja tylko do przeglądania
-  // nie ma suwaka, więc zawsze pokazuje 100%.
+  // ma swoje własne zapamiętane powiększenie.
   const SAVED_ZOOM = (() => {
     const v = Number(new URLSearchParams(window.location.search).get("zoom"));
     return Number.isInteger(v) && v >= ZOOM_MIN && v <= ZOOM_MAX ? v : ZOOM_DEFAULT;
@@ -2582,6 +2628,16 @@
   const ZOOM_PANEL_H = 200;
   const ZOOM_TRACK_TOP = 26;
   const ZOOM_TRACK_LEN = ZOOM_PANEL_H - 2 - 2 * ZOOM_TRACK_TOP;
+  // Wersja tylko do przeglądania: suwak poziomy, w wierszu pod książką, tam
+  // gdzie w zwykłej wersji są przyciski plików. Wymiary: szerokość i wysokość
+  // pola, początek toru (od lewej, wewnątrz ramki), wysokość toru (od góry)
+  // i długość toru.
+  const ZOOM_HORIZONTAL = VIEWER;
+  const ZOOM_H_PANEL_W = 180;
+  const ZOOM_H_PANEL_H = 40;
+  const ZOOM_H_TRACK_LEFT = 16;
+  const ZOOM_H_TRACK_Y = 15;
+  const ZOOM_H_TRACK_LEN = ZOOM_H_PANEL_W - 2 - 2 * ZOOM_H_TRACK_LEFT;
   // Tak blisko środka toru uchwyt staje dokładnie na 100%.
   const ZOOM_SNAP_PX = 4;
   // Grubość pasków przewijania (patrz .book-scroller) i odstęp książki od
@@ -6559,7 +6615,7 @@
       setZoom(pct);
       // Program zapisuje nowe powiększenie w pliku ustawień: zostaje takie
       // samo po zamknięciu programu i po ponownym uruchomieniu komputera.
-      if (!VIEWER) hostPost("zoomSave\n" + pct);
+      hostPost("zoomSave\n" + pct);
     };
 
     // Uchwyt suwaka: tylko myszką (lewy przycisk). Kliknięcie w tor przenosi
@@ -6578,24 +6634,30 @@
         else if (ae.classList.contains("dim-input")) ae.blur();
       }
 
+      // Pionowy suwak: liczy się y myszki (góra = 400%). Poziomy (wersja tylko
+      // do przeglądania): x myszki (prawo = 400%).
+      const H = ZOOM_HORIZONTAL;
+      const coord = (ev) => H ? ev.clientX : ev.clientY;
       const r0 = track.getBoundingClientRect();
-      const handleY = r0.top + (1 - zoomToPos(zoomRef.current)) * r0.height;
+      const pos0 = zoomToPos(zoomRef.current);
+      const handleAt = H ? r0.left + pos0 * r0.width : r0.top + (1 - pos0) * r0.height;
       // Złapany sam uchwyt: nie przeskakuje pod kursor, tylko jedzie za nim.
-      const grab = Math.abs(e.clientY - handleY) <= 9 ? e.clientY - handleY : 0;
+      const grab = Math.abs(coord(e) - handleAt) <= 9 ? coord(e) - handleAt : 0;
 
       let pct = zoomRef.current, frame = 0, done = false;
-      const update = (clientY) => {
+      const update = (c) => {
         const r = track.getBoundingClientRect();
-        if (!r.height) return;
-        let t = 1 - (clientY - grab - r.top) / r.height;
-        if (Math.abs(t - 0.5) * r.height <= ZOOM_SNAP_PX) t = 0.5;   // dokładnie 100%
+        const len = H ? r.width : r.height;
+        if (!len) return;
+        let t = H ? (c - grab - r.left) / len : 1 - (c - grab - r.top) / len;
+        if (Math.abs(t - 0.5) * len <= ZOOM_SNAP_PX) t = 0.5;   // dokładnie 100%
         pct = posToZoom(t);
         if (!frame) frame = requestAnimationFrame(() => { frame = 0; setZoomPreview(pct); });
       };
       const move = (ev) => {
         ev.stopPropagation();      // książka nie reaguje na ruch myszki (zagięcia rogów)
         if (ev.buttons === 0) { up(); return; }   // przycisk puszczony poza oknem
-        update(ev.clientY);
+        update(coord(ev));
       };
       const up = (ev) => {
         if (ev && ev.stopPropagation) ev.stopPropagation();
@@ -6613,7 +6675,7 @@
 
       document.documentElement.classList.add("zoom-dragging");
       setZoomDragging(true);
-      update(e.clientY);
+      update(coord(e));
       document.addEventListener("mousemove", move, true);
       document.addEventListener("mouseup", up, true);
       window.addEventListener("blur", up);   // okno straciło fokus w trakcie
@@ -6636,6 +6698,84 @@
     };
     const zoomText = zoomInput !== null ? zoomInput : shownPct + "%";
     const zoomHandleTop = ZOOM_TRACK_TOP + (1 - zoomToPos(shownPct)) * ZOOM_TRACK_LEN;
+    const zoomHandleLeft = ZOOM_H_TRACK_LEFT + zoomToPos(shownPct) * ZOOM_H_TRACK_LEN;
+
+    // Suwak powiększenia. Zwykła wersja: pionowy, przy lewym dolnym rogu
+    // książki (na górze 400%, na dole 10%). Wersja tylko do przeglądania:
+    // poziomy, w wierszu pod książką przy jej prawej krawędzi (po lewej 10%,
+    // po prawej 400%). W połowie zawsze 100%. Tylko myszką albo przez
+    // wpisanie wartości w pole przy uchwycie.
+    const zoomControl = () => {
+      const H = ZOOM_HORIZONTAL;
+      return h("div", {
+        className: "zoom-control" + (H ? " horizontal" : "") + (zoomDragging ? " dragging" : ""),
+        style: H
+          ? { width: ZOOM_H_PANEL_W + "px", height: ZOOM_H_PANEL_H + "px" }
+          : { height: ZOOM_PANEL_H + "px" }
+      },
+        H ? h("div", { className: "zoom-end", style: { left: ZOOM_H_TRACK_LEFT + "px" } }, ZOOM_MIN + "%")
+          : h("div", { className: "zoom-end top" }, ZOOM_MAX + "%"),
+        H ? h("div", { className: "zoom-end", style: { left: (ZOOM_H_TRACK_LEFT + ZOOM_H_TRACK_LEN) + "px" } }, ZOOM_MAX + "%")
+          : h("div", { className: "zoom-end bottom" }, ZOOM_MIN + "%"),
+        h("div", {
+          className: "zoom-track",
+          ref: zoomTrackRef,
+          style: H
+            ? { left: ZOOM_H_TRACK_LEFT + "px", width: ZOOM_H_TRACK_LEN + "px", top: ZOOM_H_TRACK_Y + "px" }
+            : { top: ZOOM_TRACK_TOP + "px", height: ZOOM_TRACK_LEN + "px" }
+        }),
+        h("div", {
+          className: "zoom-mid",
+          style: H
+            ? { left: (ZOOM_H_TRACK_LEFT + ZOOM_H_TRACK_LEN / 2) + "px", top: ZOOM_H_TRACK_Y + "px" }
+            : { top: (ZOOM_TRACK_TOP + ZOOM_TRACK_LEN / 2) + "px" }
+        }),
+        h("div", {
+          className: "zoom-hit",
+          "data-tip": "Powiększenie książki",
+          style: H
+            ? { left: (ZOOM_H_TRACK_LEFT - 10) + "px", width: (ZOOM_H_TRACK_LEN + 20) + "px" }
+            : { top: (ZOOM_TRACK_TOP - 10) + "px", height: (ZOOM_TRACK_LEN + 20) + "px" },
+          onMouseDown: startZoomDrag
+        }),
+        h("div", {
+          className: "zoom-handle",
+          style: H ? { left: zoomHandleLeft + "px", top: ZOOM_H_TRACK_Y + "px" } : { top: zoomHandleTop + "px" }
+        }),
+        // Aktualna wartość: przy pionowym suwaku po lewej stronie uchwytu,
+        // przy poziomym nad nim. Można ją kliknąć i wpisać.
+        h("input", {
+          type: "text",
+          className: "zoom-value",
+          inputMode: "numeric",
+          maxLength: 5,
+          spellCheck: false,
+          autoComplete: "off",
+          "data-tip": `Wpisz powiększenie (od ${ZOOM_MIN}% do ${ZOOM_MAX}%) i naciśnij Enter`,
+          style: H ? { left: zoomHandleLeft + "px" } : { top: zoomHandleTop + "px" },
+          value: zoomText,
+          onFocus: (e) => {
+            const el = e.target;
+            setZoomInput(zoom + "%");
+            setTimeout(() => { if (document.activeElement === el) el.select(); }, 0);
+          },
+          // Tylko cyfry (i znak procentu).
+          onChange: (e) => setZoomInput(e.target.value.replace(/[^0-9%]/g, "")),
+          onKeyDown: (e) => {
+            e.stopPropagation();
+            if (e.key === "Enter") {
+              e.preventDefault();
+              e.target.blur();                  // zatwierdza (onBlur)
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              zoomInputCancelRef.current = true;
+              e.target.blur();
+            }
+          },
+          onBlur: commitZoomInput
+        })
+      );
+    };
 
     const boxesFor = (pageKey) => boxes.filter((b) => b.page === pageKey);
     const imagesFor = (pageKey) => images.filter((im) => im.page === pageKey);
@@ -6831,63 +6971,15 @@
                 : "Kliknij miejsce na stronie, w\u00A0którym ma się pojawić obraz."
             )
           ),
-          // Suwak powiększenia przy lewym dolnym rogu książki: na górze 400%,
-          // na dole 10%, w połowie 100%. Tylko myszką albo przez wpisanie wartości.
-          !VIEWER && h("div", {
-            className: "zoom-control" + (zoomDragging ? " dragging" : ""),
-            style: { height: ZOOM_PANEL_H + "px" }
-          },
-            h("div", { className: "zoom-end top" }, ZOOM_MAX + "%"),
-            h("div", { className: "zoom-end bottom" }, ZOOM_MIN + "%"),
-            h("div", {
-              className: "zoom-track",
-              ref: zoomTrackRef,
-              style: { top: ZOOM_TRACK_TOP + "px", height: ZOOM_TRACK_LEN + "px" }
-            }),
-            h("div", { className: "zoom-mid", style: { top: (ZOOM_TRACK_TOP + ZOOM_TRACK_LEN / 2) + "px" } }),
-            h("div", {
-              className: "zoom-hit",
-              "data-tip": "Powiększenie książki",
-              style: { top: (ZOOM_TRACK_TOP - 10) + "px", height: (ZOOM_TRACK_LEN + 20) + "px" },
-              onMouseDown: startZoomDrag
-            }),
-            h("div", { className: "zoom-handle", style: { top: zoomHandleTop + "px" } }),
-            // Aktualna wartość, po lewej stronie uchwytu. Można ją kliknąć i wpisać.
-            h("input", {
-              type: "text",
-              className: "zoom-value",
-              inputMode: "numeric",
-              maxLength: 5,
-              spellCheck: false,
-              autoComplete: "off",
-              "data-tip": `Wpisz powiększenie (od ${ZOOM_MIN}% do ${ZOOM_MAX}%) i naciśnij Enter`,
-              style: { top: zoomHandleTop + "px" },
-              value: zoomText,
-              onFocus: (e) => {
-                const el = e.target;
-                setZoomInput(zoom + "%");
-                setTimeout(() => { if (document.activeElement === el) el.select(); }, 0);
-              },
-              // Tylko cyfry (i znak procentu).
-              onChange: (e) => setZoomInput(e.target.value.replace(/[^0-9%]/g, "")),
-              onKeyDown: (e) => {
-                e.stopPropagation();
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  e.target.blur();                  // zatwierdza (onBlur)
-                } else if (e.key === "Escape") {
-                  e.preventDefault();
-                  zoomInputCancelRef.current = true;
-                  e.target.blur();
-                }
-              },
-              onBlur: commitZoomInput
-            })
-          )
+          // Suwak powiększenia przy lewym dolnym rogu książki (pionowy).
+          !VIEWER && zoomControl()
       ),
       // Wiersz pod książką: przyciski kropek przy lewej krawędzi książki,
       // przewracanie stron na środku, przyciski plików przy prawej.
-      h("div", { className: "controls", style: { width: (baseSize.w * 2) + "px" } },
+      h("div", {
+        className: "controls" + (VIEWER ? " viewer-controls" : ""),
+        style: { width: (baseSize.w * 2) + "px" }
+      },
         // Przyciski niestandardowego układu kropek (wyrównywanie do punktów).
         !VIEWER && h("div", {
           className: "dots-actions" + (alignOn && !coverLock ? " visible" : ""),
@@ -6957,7 +7049,9 @@
             bookRef.current.pageFlip().flipNext();
           } }, "Następna ▶")
         ),
-        // Wersja tylko do przeglądania nie ma przycisków plików.
+        // Wersja tylko do przeglądania nie ma przycisków plików: w ich miejscu
+        // jest poziomy suwak powiększenia.
+        VIEWER && zoomControl(),
         !VIEWER && h("div", { className: "file-row" },
           h("div", {
             className: "file-btn",
