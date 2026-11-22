@@ -2,7 +2,7 @@
 
 windres app.rc -O coff -o app_res.o
 
-g++ main.cpp app_res.o -o app.exe -municode -mwindows -O2 -s -static -static-libgcc -static-libstdc++ -lole32 -lshell32 -luser32 -lgdi32 -luuid
+g++ main.cpp app_res.o -o app.exe -municode -mwindows -O2 -s -static -static-libgcc -static-libstdc++ -lole32 -lshell32 -luser32 -lgdi32 -luuid -ladvapi32
 
 */
 
@@ -19,6 +19,7 @@ g++ main.cpp app_res.o -o app.exe -municode -mwindows -O2 -s -static -static-lib
 #include <utility>
 #include <cstring>
 #include <shobjidl.h>
+#include <shlobj.h>
 #include "WebView2.h"
 
 #ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
@@ -74,6 +75,8 @@ std::wstring g_filePath;            // file the chronicle was saved to / opened 
 std::wstring g_pendingOpenPath;     // file just read, until the page accepts it
 bool g_dirty = false;               // the page says: content is not in a file
 bool g_closeConfirmed = false;      // closing was allowed (nothing to lose, or the user agreed)
+std::wstring g_externalOpenPath;    // plik z Eksploratora, czeka na otwarcie przez stronę
+bool g_pageReady = false;           // strona już działa i odbiera wiadomości
 
 ComPtr<ICoreWebView2Controller> g_webviewController;
 ComPtr<ICoreWebView2> g_webview;
@@ -242,6 +245,10 @@ static HRESULT QueryOwnInterface(T* self, const IID& own, REFIID riid, void** pp
 
 const wchar_t FILE_FILTER_NAME[] = L"Kronika szkolna (*.kronika)";
 const wchar_t FILE_FILTER_SPEC[] = L"*.kronika";
+// Skojarzenie plików .kronika z programem (dwuklik w Eksploratorze).
+const wchar_t FILE_PROG_ID[] = L"KronikaSzkolna.Plik";
+// WM_COPYDATA: druga kopia programu przekazuje ścieżkę pliku do otwarcia.
+const ULONG_PTR COPYDATA_OPEN_FILE = 0x4B524F4E;   // "KRON"
 
 const wchar_t LAYOUTS_FILE_NAME[]     = L"uklady-punktow.json";
 // Name used by earlier versions, when the file lay next to app.exe.
@@ -668,6 +675,40 @@ static bool PickExportPath(HWND hwnd, const std::wstring& source, std::wstring& 
     return ResultPath(dlg.Get(), out);
 }
 
+// ---- Skojarzenie plików .kronika z programem ---------------------------------
+// Zapisywane w rejestrze bieżącego użytkownika (bez uprawnień administratora)
+// przy każdym uruchomieniu, więc działa też po przeniesieniu folderu programu.
+
+// Ustawia domyślną wartość klucza. true, jeśli coś się zmieniło.
+static bool SetRegText(const std::wstring& subkey, const std::wstring& value)
+{
+    HKEY key;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, subkey.c_str(), 0, nullptr, 0,
+                        KEY_QUERY_VALUE | KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS)
+        return false;
+    std::wstring old(1024, L'\0');
+    DWORD type = 0, size = (DWORD)((old.size() - 1) * sizeof(wchar_t));
+    bool same = RegQueryValueExW(key, nullptr, nullptr, &type, (BYTE*)&old[0], &size) == ERROR_SUCCESS
+             && type == REG_SZ && lstrcmpW(old.c_str(), value.c_str()) == 0;
+    bool changed = !same && RegSetValueExW(key, nullptr, 0, REG_SZ, (const BYTE*)value.c_str(),
+                        (DWORD)((value.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
+    RegCloseKey(key);
+    return changed;
+}
+
+static void RegisterFileType()
+{
+    const std::wstring exe = GetExePath();
+    const std::wstring cls = std::wstring(L"Software\\Classes\\") + FILE_PROG_ID;
+    bool changed = false;
+    changed |= SetRegText(L"Software\\Classes\\.kronika", FILE_PROG_ID);
+    changed |= SetRegText(cls, L"Kronika szkolna");
+    changed |= SetRegText(cls + L"\\DefaultIcon", L"\"" + exe + L"\",0");
+    changed |= SetRegText(cls + L"\\shell\\open\\command", L"\"" + exe + L"\" \"%1\"");
+    // Eksplorator od razu pokazuje nową ikonę i nowe skojarzenie.
+    if (changed) SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
+}
+
 // The fade-out that ends with DestroyWindow (see WM_TIMER).
 static void StartFadeOut(HWND hwnd)
 {
@@ -748,6 +789,20 @@ static void ProcessPageMessages(HWND hwnd)
         else if (cmd == L"openRejected")   // not a chronicle file: keep the old path
         {
             g_pendingOpenPath.clear();
+        }
+        else if (cmd == L"pageReady")      // strona działa: może czeka plik z Eksploratora
+        {
+            g_pageReady = true;
+            if (!g_externalOpenPath.empty()) PostToPage(L"externalOpen");
+        }
+        else if (cmd == L"openPending")    // otwórz plik przekazany z Eksploratora
+        {
+            std::wstring path, content;
+            path.swap(g_externalOpenPath);
+            if (path.empty()) { PostToPage(L"openCancelled"); continue; }
+            if (!ReadUtf8File(path, content)) { PostToPage(L"openFailed"); continue; }
+            g_pendingOpenPath = path;
+            PostToPage(L"opened\n" + content);
         }
         else if (cmd == L"layoutsRead")    // content of the layouts file
         {
@@ -1174,6 +1229,21 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         ProcessPageMessages(hwnd);
         return 0;
 
+    // Druga kopia programu (dwuklik pliku w Eksploratorze) przysyła ścieżkę.
+    case WM_COPYDATA:
+    {
+        const COPYDATASTRUCT* cds = (const COPYDATASTRUCT*)lParam;
+        if (g_viewer || !cds || cds->dwData != COPYDATA_OPEN_FILE || !cds->lpData
+            || cds->cbData < sizeof(wchar_t))
+            return FALSE;
+        std::wstring path((const wchar_t*)cds->lpData, cds->cbData / sizeof(wchar_t));
+        while (!path.empty() && path.back() == L'\0') path.pop_back();
+        if (path.empty()) return FALSE;
+        g_externalOpenPath = path;
+        if (g_pageReady) PostToPage(L"externalOpen");   // inaczej zrobi to "pageReady"
+        return TRUE;
+    }
+
     // Zero-size non-client frame: DWM still treats this as a normal
     // captioned window (native animations), but nothing is drawn there.
     // Maximized: the client area is cut back to the screen (see above).
@@ -1453,6 +1523,22 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     PackageState package = ReadPackage(packedFiles, packedDoc);
     g_viewer = (package != PACKAGE_NONE);
 
+    // Plik podany przy uruchomieniu (dwuklik pliku .kronika w Eksploratorze).
+    std::wstring openPath;
+    if (!g_viewer)
+    {
+        int argc = 0;
+        LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+        if (argv && argc >= 2 && argv[1][0])
+        {
+            wchar_t full[MAX_PATH * 4];
+            const DWORD cap = (DWORD)(sizeof(full) / sizeof(full[0]));
+            DWORD n = GetFullPathNameW(argv[1], cap, full, nullptr);
+            openPath = (n > 0 && n < cap) ? full : argv[1];
+        }
+        if (argv) LocalFree(argv);
+    }
+
     HANDLE instanceMutex = g_viewer ? nullptr : CreateMutexW(nullptr, TRUE, MUTEX_NAME);
     if (instanceMutex && GetLastError() == ERROR_ALREADY_EXISTS)
     {
@@ -1461,10 +1547,19 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
         {
             if (IsIconic(running)) ShowWindow(running, SW_RESTORE);
             SetForegroundWindow(running);
+            // Plik z Eksploratora: otwiera go program, który już działa.
+            if (!openPath.empty())
+            {
+                COPYDATASTRUCT cds = { COPYDATA_OPEN_FILE,
+                    (DWORD)((openPath.size() + 1) * sizeof(wchar_t)), (PVOID)openPath.c_str() };
+                SendMessageTimeoutW(running, WM_COPYDATA, 0, (LPARAM)&cds, SMTO_ABORTIFHUNG, 5000, nullptr);
+            }
         }
-        if (instanceMutex) CloseHandle(instanceMutex);
+        CloseHandle(instanceMutex);
         return 0;
     }
+    g_externalOpenPath = openPath;          // otworzy się, gdy strona będzie gotowa
+    if (!g_viewer) RegisterFileType();      // dwuklik pliku .kronika otwiera ten program
 
     // Where flipbook.html and WebView2Loader.dll are: next to app.exe, or
     // (view-only copy) in the folder they were just unpacked to.
