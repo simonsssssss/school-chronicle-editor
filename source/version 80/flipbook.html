@@ -1058,8 +1058,7 @@
   }
 
   /* Suwak powiększenia: pionowy, przy lewej krawędzi książki, dolnym końcem
-     przy jej lewym dolnym rogu (tak jak przyciski narzędzi po prawej).
-     Na okładce (przedniej i tylnej) się chowa. */
+     przy jej lewym dolnym rogu (tak jak przyciski narzędzi po prawej). */
   .zoom-control {
     position: absolute;
     right: 100%;
@@ -1074,13 +1073,6 @@
     pointer-events: auto;
     user-select: none;
     z-index: 10;
-    transition: opacity 0.2s ease, visibility 0s linear 0s;
-  }
-  .zoom-control.hidden {
-    opacity: 0;
-    visibility: hidden;
-    pointer-events: none;
-    transition: opacity 0.2s ease, visibility 0s linear 0.2s;
   }
   /* "400%" na górze, "10%" na dole. */
   .zoom-end {
@@ -1163,7 +1155,6 @@
     cursor: text;
     pointer-events: auto;
   }
-  .zoom-control.hidden .zoom-value { pointer-events: none; }
   .zoom-value:hover { border-color: #aaa; }
   .zoom-value:focus { border-color: #0078d7; }
   /* Podczas przeciągania uchwytu wszędzie ten sam kursor. */
@@ -6643,15 +6634,6 @@
       }
       commitZoom(v);
     };
-    // Okładka: suwak się chowa. Wartość, która była właśnie wpisywana, przepada.
-    useEffect(() => {
-      if (!coverLock) return;
-      const ae = document.activeElement;
-      if (ae && ae.classList && ae.classList.contains("zoom-value")) {
-        zoomInputCancelRef.current = true;
-        ae.blur();
-      }
-    }, [coverLock]);
     const zoomText = zoomInput !== null ? zoomInput : shownPct + "%";
     const zoomHandleTop = ZOOM_TRACK_TOP + (1 - zoomToPos(shownPct)) * ZOOM_TRACK_LEN;
 
@@ -6851,9 +6833,8 @@
           ),
           // Suwak powiększenia przy lewym dolnym rogu książki: na górze 400%,
           // na dole 10%, w połowie 100%. Tylko myszką albo przez wpisanie wartości.
-          // Na okładce (i gdy książka się na nią zamyka) jest schowany.
           !VIEWER && h("div", {
-            className: "zoom-control" + (zoomDragging ? " dragging" : "") + (coverLock ? " hidden" : ""),
+            className: "zoom-control" + (zoomDragging ? " dragging" : ""),
             style: { height: ZOOM_PANEL_H + "px" }
           },
             h("div", { className: "zoom-end top" }, ZOOM_MAX + "%"),
