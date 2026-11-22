@@ -44,11 +44,13 @@
     align-items: center;
     justify-content: center;
   }
-  /* Wraps just the book so the toggle buttons can be positioned relative to it. */
-  .book-wrap { position: relative; }
+  /* Sama książka. Leży w warstwie przewijania (.book-scroller), pod całym
+     interfejsem; położenie i rozmiar ustawia skrypt (powiększenie). */
+  .book-wrap { position: absolute; left: 0; top: 0; }
   .page {
     background: #fafafa; border: 1px solid #ddd; box-sizing: border-box;
-    padding: 24px; position: relative; /* anchors absolutely-positioned text boxes */
+    /* --zoom: powiększenie książki (1 = 100%) */
+    padding: calc(24px * var(--zoom, 1)); position: relative; /* anchors absolutely-positioned text boxes */
   }
   .page-cover {
     background:
@@ -1005,6 +1007,167 @@
   }
   .page-input:hover { border-color: #ccc; }
   .page-input:focus { border-color: #0078d7; background: #fff; }
+
+  /* ---- Powiększanie książki ---------------------------------------------- */
+  /* Warstwa z książką: całe okno, zawsze POD przyciskami, suwakiem i resztą
+     interfejsu. Gdy powiększona książka nie mieści się w oknie, pojawiają
+     się paski przewijania (wyglądają jak w oknie wyboru układu punktów). */
+  .book-scroller {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    overflow: auto;
+  }
+  /* Pasek ma 16 px, ale widać z niego tylko środkowe 8 px (przezroczysta
+     ramka): pasek jest odsunięty o 4 px od krawędzi okna i od książki. */
+  .book-scroller::-webkit-scrollbar { width: 16px; height: 16px; }
+  .book-scroller::-webkit-scrollbar-track { background: transparent; margin: 4px; }
+  .book-scroller::-webkit-scrollbar-thumb {
+    background: #ccc;
+    background-clip: padding-box;
+    border: 4px solid transparent;
+    border-radius: 8px;
+  }
+  .book-scroller::-webkit-scrollbar-thumb:hover { background: #aaa; background-clip: padding-box; }
+  .book-scroller::-webkit-scrollbar-corner { background: transparent; }
+  /* Obszar przewijania. Cienie przewracanych stron, które wystają poza
+     książkę, nie powiększają go (i nie wywołują pasków przewijania). */
+  .book-scroll-content {
+    position: relative;
+    overflow: clip;
+  }
+  /* Miejsce, które książka zajmuje przy 100%. Przyciski narzędzi, notki
+     i suwak powiększenia są przypięte do niego, więc nie ruszają się, gdy
+     książka się powiększa. Kliknięcia przechodzą przez nie do książki. */
+  .book-slot {
+    position: relative;
+    z-index: 1;
+    pointer-events: none;
+  }
+  .controls {
+    position: relative;
+    z-index: 1;
+    pointer-events: none;
+  }
+  .toggle-row, .nav-group, .file-row, .dots-actions { pointer-events: auto; }
+  /* Licznik stron czytelny także nad powiększoną książką. */
+  .controls .counter {
+    align-self: stretch;
+    background: #fff;
+    border-radius: 6px;
+  }
+
+  /* Suwak powiększenia: pionowy, przy lewej krawędzi książki, dolnym końcem
+     przy jej lewym dolnym rogu (tak jak przyciski narzędzi po prawej).
+     Na okładce (przedniej i tylnej) się chowa. */
+  .zoom-control {
+    position: absolute;
+    right: 100%;
+    bottom: 0;
+    margin-right: 14px;
+    width: 36px;
+    box-sizing: border-box;
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    pointer-events: auto;
+    user-select: none;
+    z-index: 10;
+    transition: opacity 0.2s ease, visibility 0s linear 0s;
+  }
+  .zoom-control.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.2s ease, visibility 0s linear 0.2s;
+  }
+  /* "400%" na górze, "10%" na dole. */
+  .zoom-end {
+    position: absolute;
+    left: 0;
+    right: 0;
+    font-size: 10px;
+    line-height: 1;
+    color: #888;
+    text-align: center;
+    pointer-events: none;
+  }
+  .zoom-end.top    { top: 6px; }
+  .zoom-end.bottom { bottom: 6px; }
+  .zoom-track {
+    position: absolute;
+    left: 50%;
+    width: 4px;
+    margin-left: -2px;
+    border-radius: 2px;
+    background: #ddd;
+    pointer-events: none;
+  }
+  /* Kreska w połowie toru: 100%. */
+  .zoom-mid {
+    position: absolute;
+    left: 50%;
+    width: 14px;
+    height: 1px;
+    margin-left: -7px;
+    background: #aaa;
+    pointer-events: none;
+  }
+  /* Obszar, który łapie myszkę: cały tor z małym zapasem. */
+  .zoom-hit {
+    position: absolute;
+    left: 0;
+    right: 0;
+    cursor: pointer;
+  }
+  .zoom-handle {
+    position: absolute;
+    left: 50%;
+    width: 14px;
+    height: 14px;
+    margin: -7px 0 0 -7px;
+    box-sizing: border-box;
+    border-radius: 50%;
+    background: #fff;
+    border: 1px solid #888;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+    pointer-events: none;
+  }
+  .zoom-hit:hover ~ .zoom-handle { border-color: #0078d7; }
+  .zoom-control.dragging .zoom-handle {
+    background: #0078d7;
+    border-color: #0078d7;
+  }
+  /* Aktualna wartość: po lewej stronie uchwytu, jedzie razem z nim.
+     Można ją kliknąć i wpisać inną. */
+  .zoom-value {
+    position: absolute;
+    right: 100%;
+    margin-right: 6px;
+    width: 48px;
+    height: 22px;
+    margin-top: -11px;
+    box-sizing: border-box;
+    padding: 0 2px;
+    font-family: inherit;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    color: #444;
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    outline: none;
+    cursor: text;
+    pointer-events: auto;
+  }
+  .zoom-control.hidden .zoom-value { pointer-events: none; }
+  .zoom-value:hover { border-color: #aaa; }
+  .zoom-value:focus { border-color: #0078d7; }
+  /* Podczas przeciągania uchwytu wszędzie ten sam kursor. */
+  html.zoom-dragging, html.zoom-dragging * { cursor: pointer !important; }
 </style>
 </head>
 <body>
@@ -2407,6 +2570,83 @@
 
     w = Math.min(Math.max(w, MIN_PAGE_W), MAX_PAGE_W);
     return { w, h: Math.floor(w * PAGE_RATIO) };
+  }
+
+  // ---- Powiększenie książki (suwak przy lewym dolnym rogu książki) ----------
+  // Wartości w procentach. 100% to rozmiar z computePageSize(), czyli taki,
+  // jaki książka miała zawsze.
+  const ZOOM_MIN = 10;
+  const ZOOM_MAX = 400;
+  const ZOOM_DEFAULT = 100;
+  // Powiększenie zapamiętane przez program (main.cpp czyta je z pliku
+  // ustawień i podaje w adresie strony: "?zoom=150"). Jedno dla całego
+  // programu, niezależnie od otwartej kroniki. Wersja tylko do przeglądania
+  // nie ma suwaka, więc zawsze pokazuje 100%.
+  const SAVED_ZOOM = (() => {
+    const v = Number(new URLSearchParams(window.location.search).get("zoom"));
+    return Number.isInteger(v) && v >= ZOOM_MIN && v <= ZOOM_MAX ? v : ZOOM_DEFAULT;
+  })();
+  // Wymiary suwaka (piksele): wysokość pola, początek toru (od góry, wewnątrz
+  // ramki) i długość toru.
+  const ZOOM_PANEL_H = 200;
+  const ZOOM_TRACK_TOP = 26;
+  const ZOOM_TRACK_LEN = ZOOM_PANEL_H - 2 - 2 * ZOOM_TRACK_TOP;
+  // Tak blisko środka toru uchwyt staje dokładnie na 100%.
+  const ZOOM_SNAP_PX = 4;
+  // Grubość pasków przewijania (patrz .book-scroller) i odstęp książki od
+  // krawędzi okna, gdy książka jest przewijana.
+  const BOOK_SCROLLBAR = 16;
+  const BOOK_SCROLL_PAD = 16;
+
+  // Rozmiar strony przy danym powiększeniu.
+  function zoomedPageSize(base, pct) {
+    if (pct === ZOOM_DEFAULT) return base;
+    const w = Math.max(1, Math.round(base.w * pct / 100));
+    return { w, h: Math.floor(w * PAGE_RATIO) };
+  }
+
+  // Powiększenie <-> położenie uchwytu (0 = dół toru, 1 = góra). Dolna połowa
+  // toru to 10–100%, górna 100–400%. W każdej połowie ten sam ruch myszki
+  // zmienia rozmiar książki o tyle samo razy.
+  function zoomToPos(pct) {
+    const z = Math.min(Math.max(pct, ZOOM_MIN), ZOOM_MAX);
+    return z <= ZOOM_DEFAULT
+      ? 0.5 * Math.log(z / ZOOM_MIN) / Math.log(ZOOM_DEFAULT / ZOOM_MIN)
+      : 0.5 + 0.5 * Math.log(z / ZOOM_DEFAULT) / Math.log(ZOOM_MAX / ZOOM_DEFAULT);
+  }
+  function posToZoom(t) {
+    t = Math.min(Math.max(t, 0), 1);
+    const z = t <= 0.5
+      ? ZOOM_MIN * Math.pow(ZOOM_DEFAULT / ZOOM_MIN, t / 0.5)
+      : ZOOM_DEFAULT * Math.pow(ZOOM_MAX / ZOOM_DEFAULT, (t - 0.5) / 0.5);
+    return Math.min(Math.max(Math.round(z), ZOOM_MIN), ZOOM_MAX);
+  }
+
+  // Położenie książki (bw x bh pikseli) w warstwie przewijania i rozmiar
+  // obszaru przewijania. view: miejsce książki przy 100% i rozmiar okna.
+  // Książka mieści się w oknie: stoi na środku swojego miejsca (przesunięta
+  // tylko tyle, żeby nie wyjść poza okno), bez pasków przewijania.
+  // Nie mieści się: pasek przewijania w tym kierunku; na końcach przewijania
+  // brzeg książki staje tam, gdzie brzeg jej miejsca przy 100%, więc żadna
+  // jej część nie zostaje schowana pod przyciskami.
+  function bookLayout(view, bw, bh) {
+    if (!view) return { x: 0, y: 0, cw: 0, ch: 0 };
+    const SB = BOOK_SCROLLBAR;
+    let needX = bw > view.W, needY = bh > view.H;
+    for (let i = 0; i < 2; i++) {          // pasek w jednym kierunku zabiera miejsce w drugim
+      needX = needX || bw > view.W - (needY ? SB : 0);
+      needY = needY || bh > view.H - (needX ? SB : 0);
+    }
+    const availW = Math.floor(view.W - (needY ? SB : 0));
+    const availH = Math.floor(view.H - (needX ? SB : 0));
+    const axis = (need, avail, size, center, before, after) => need
+      ? { pos: before, content: Math.ceil(before + size + after) }
+      : { pos: Math.min(Math.max(center - size / 2, 0), avail - size), content: avail };
+    const ax = axis(needX, availW, bw, view.cx,
+      Math.max(BOOK_SCROLL_PAD, view.left), Math.max(BOOK_SCROLL_PAD, view.W - view.right));
+    const ay = axis(needY, availH, bh, view.cy,
+      Math.max(BOOK_SCROLL_PAD, view.top), Math.max(BOOK_SCROLL_PAD, view.H - view.bottom));
+    return { x: ax.pos, y: ay.pos, cw: ax.content, ch: ay.content };
   }
 
   // The page-flip library reports the FIRST page index of the current spread.
@@ -3986,7 +4226,28 @@
     const flipbookContainerRef = useRef(null);
     const [page, setPage] = useState(0);
     const [orientation, setOrientation] = useState("landscape");
-    const [size, setSize] = useState(computePageSize);
+    // Rozmiar strony przy 100% (zależy od okna) i powiększenie w procentach.
+    const [baseSize, setBaseSize] = useState(computePageSize);
+    const baseSizeRef = useRef(baseSize);
+    baseSizeRef.current = baseSize;
+    const [zoom, setZoom] = useState(SAVED_ZOOM);
+    const zoomRef = useRef(SAVED_ZOOM);
+    zoomRef.current = zoom;
+    // Prawdziwy rozmiar strony książki (powiększenie już zatwierdzone).
+    const size = React.useMemo(() => zoomedPageSize(baseSize, zoom), [baseSize, zoom]);
+    // Powiększenie w trakcie przeciągania uchwytu (null: nie przeciąga się).
+    // Do puszczenia myszki książka jest tylko skalowana na ekranie.
+    const [zoomPreview, setZoomPreview] = useState(null);
+    const [zoomDragging, setZoomDragging] = useState(false);
+    const [zoomInput, setZoomInput] = useState(null);   // tekst wpisywany w pole (null: nie pisze)
+    const zoomInputCancelRef = useRef(false);           // Esc: bez zmiany
+    const zoomTrackRef = useRef(null);
+    // Warstwa przewijania z książką i miejsce książki przy 100%.
+    const scrollerRef = useRef(null);
+    const slotRef = useRef(null);
+    const [view, setView] = useState(null);
+    const scrollPosRef = useRef({ l: 0, t: 0 });
+    const lastLayoutRef = useRef(null);
     const [bookReady, setBookReady] = useState(false);
 
     // Keys of the inner pages, in order. Keys are never reused or renumbered,
@@ -4437,9 +4698,13 @@
       const onResize = () => setColorPicker(null);
       document.addEventListener("mousedown", onDown, true);
       window.addEventListener("resize", onResize);
+      // Przewinięcie książki: przycisk koloru odjeżdża, panel się zamyka.
+      const sc = scrollerRef.current;
+      if (sc) sc.addEventListener("scroll", onResize);
       return () => {
         document.removeEventListener("mousedown", onDown, true);
         window.removeEventListener("resize", onResize);
+        if (sc) sc.removeEventListener("scroll", onResize);
       };
     }, [colorPicker]);
 
@@ -5235,13 +5500,19 @@
 
     // Lay a static copy of the current book over it. Must be called while
     // the DOM still shows the old book (i.e. before the remount).
-    const freezeBook = () => {
+    // scale: zmiana powiększenia; kopia starej książki jest od razu
+    // pokazywana w nowym rozmiarze.
+    const freezeBook = (scale) => {
       const holder = freezeRef.current;
       const container = flipbookContainerRef.current;
       const live = container && container.querySelector(".stf__parent");
       if (!holder || !live) return;
 
       const copy = live.cloneNode(true);
+      if (typeof scale === "number" && scale !== 1) {
+        copy.style.transformOrigin = "0 0";
+        copy.style.transform = `scale(${scale})`;
+      }
       // cloneNode copies attributes, not values typed into inputs / chosen in lists.
       const srcInputs = live.querySelectorAll("input");
       copy.querySelectorAll("input").forEach((el, i) => { el.value = srcInputs[i].value; });
@@ -6155,18 +6426,21 @@
         clearTimeout(timer);
         timer = setTimeout(() => {
           const next = computePageSize();
-          if (size.w === next.w && size.h === next.h) return;
+          if (baseSize.w === next.w && baseSize.h === next.h) return;
           // The flipbook key includes size, so a resize is about to remount
           // every textbox node — remember the box being edited (to give it
           // focus back afterwards) and capture all live content first.
-          rememberFocusedBox();
-          syncBoxesFromDOM();
-          setSize(next);
+          const a = zoomedPageSize(baseSize, zoom), b = zoomedPageSize(next, zoom);
+          if (a.w !== b.w || a.h !== b.h) {
+            rememberFocusedBox();
+            syncBoxesFromDOM();
+          }
+          setBaseSize(next);   // powiększenie zostaje to samo
         }, 120);
       };
       window.addEventListener("resize", onResize);
       return () => { clearTimeout(timer); window.removeEventListener("resize", onResize); };
-    }, [size]);
+    }, [baseSize, zoom]);
 
     // The library decides orientation itself after each mount
     // (after a resize or after adding/deleting pages remounted the book).
@@ -6225,6 +6499,162 @@
       jumpShownTimerRef.current = setTimeout(() => setJumpShown(null), 3000);
       flip.flip(target);
     };
+    // ---- Powiększenie książki ------------------------------------------------
+    // Rozmiar książki na ekranie (w trakcie przeciągania: podgląd).
+    const shownPct = zoomPreview !== null ? zoomPreview : zoom;
+    const shown = React.useMemo(() => zoomedPageSize(baseSize, shownPct), [baseSize, shownPct]);
+    const previewScale = shown.w / size.w;
+
+    // Gdzie w oknie jest miejsce książki przy 100%.
+    const measureView = () => {
+      const el = slotRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const next = {
+        left: r.left, top: r.top, right: r.right, bottom: r.bottom,
+        cx: (r.left + r.right) / 2, cy: (r.top + r.bottom) / 2,
+        W: window.innerWidth, H: window.innerHeight
+      };
+      setView((p) => (p && Object.keys(next).every((k) => Math.abs(p[k] - next[k]) < 0.01)) ? p : next);
+    };
+    React.useLayoutEffect(measureView);
+    useEffect(() => {
+      window.addEventListener("resize", measureView);
+      return () => window.removeEventListener("resize", measureView);
+    }, []);
+
+    const lay = bookLayout(view, shown.w * 2, shown.h);
+
+    // Po każdej zmianie powiększenia (albo okna) punkt książki, który był na
+    // środku jej miejsca, zostaje na środku: książka rośnie i maleje wokół niego.
+    React.useLayoutEffect(() => {
+      const sc = scrollerRef.current;
+      if (!sc || !view) return;
+      const cur = { x: lay.x, y: lay.y, bw: shown.w * 2, bh: shown.h,
+                    cx: view.cx, cy: view.cy, cw: lay.cw, ch: lay.ch };
+      const prev = lastLayoutRef.current;
+      if (prev && Object.keys(cur).every((k) => prev[k] === cur[k])) return;
+      lastLayoutRef.current = cur;
+      const part = (v) => Math.min(Math.max(v, 0), 1);
+      let fx = 0.5, fy = 0.5;
+      if (prev) {
+        fx = part((scrollPosRef.current.l + prev.cx - prev.x) / prev.bw);
+        fy = part((scrollPosRef.current.t + prev.cy - prev.y) / prev.bh);
+      }
+      sc.scrollLeft = cur.x + fx * cur.bw - cur.cx;
+      sc.scrollTop = cur.y + fy * cur.bh - cur.cy;
+      scrollPosRef.current = { l: sc.scrollLeft, t: sc.scrollTop };
+    });
+
+    // Nowe powiększenie. Książka jest budowana od nowa w nowym rozmiarze
+    // (tak jak po zmianie rozmiaru okna), więc wszystko w niej (pola, obrazy,
+    // przewracanie, przeciąganie) działa przy każdym powiększeniu tak samo.
+    const commitZoom = (pct) => {
+      setZoomPreview(null);
+      pct = Math.min(Math.max(Math.round(pct), ZOOM_MIN), ZOOM_MAX);
+      const from = zoomRef.current;
+      if (pct === from) return;
+      const base = baseSizeRef.current;
+      const a = zoomedPageSize(base, from), b = zoomedPageSize(base, pct);
+      if (a.w !== b.w || a.h !== b.h) {
+        // Edytowane pole dostanie z powrotem fokus i kursor; treść pól jest
+        // zapisywana w stanie, zanim stara książka zniknie...
+        rememberFocusedBox();
+        syncBoxesFromDOM();
+        // ...a zanim nowa będzie gotowa, widać już powiększoną starą.
+        freezeBook(b.w / a.w);
+      }
+      zoomRef.current = pct;
+      setZoom(pct);
+      // Program zapisuje nowe powiększenie w pliku ustawień: zostaje takie
+      // samo po zamknięciu programu i po ponownym uruchomieniu komputera.
+      if (!VIEWER) hostPost("zoomSave\n" + pct);
+    };
+
+    // Uchwyt suwaka: tylko myszką (lewy przycisk). Kliknięcie w tor przenosi
+    // uchwyt w to miejsce, przeciąganie go przesuwa. Książka zmienia się na
+    // bieżąco, a po puszczeniu przycisku zostaje zbudowana w nowym rozmiarze.
+    const startZoomDrag = (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();          // bez zaznaczania tekstu; fokus zostaje, gdzie był
+      const track = zoomTrackRef.current;
+      if (!track) return;
+      const ae = document.activeElement;
+      if (ae && ae.classList) {
+        // Wpisywana wartość powiększenia: porzucona. Wymiar obrazu: zatwierdzony
+        // (jego pole zniknie razem ze starą książką).
+        if (ae.classList.contains("zoom-value")) { zoomInputCancelRef.current = true; ae.blur(); }
+        else if (ae.classList.contains("dim-input")) ae.blur();
+      }
+
+      const r0 = track.getBoundingClientRect();
+      const handleY = r0.top + (1 - zoomToPos(zoomRef.current)) * r0.height;
+      // Złapany sam uchwyt: nie przeskakuje pod kursor, tylko jedzie za nim.
+      const grab = Math.abs(e.clientY - handleY) <= 9 ? e.clientY - handleY : 0;
+
+      let pct = zoomRef.current, frame = 0, done = false;
+      const update = (clientY) => {
+        const r = track.getBoundingClientRect();
+        if (!r.height) return;
+        let t = 1 - (clientY - grab - r.top) / r.height;
+        if (Math.abs(t - 0.5) * r.height <= ZOOM_SNAP_PX) t = 0.5;   // dokładnie 100%
+        pct = posToZoom(t);
+        if (!frame) frame = requestAnimationFrame(() => { frame = 0; setZoomPreview(pct); });
+      };
+      const move = (ev) => {
+        ev.stopPropagation();      // książka nie reaguje na ruch myszki (zagięcia rogów)
+        if (ev.buttons === 0) { up(); return; }   // przycisk puszczony poza oknem
+        update(ev.clientY);
+      };
+      const up = (ev) => {
+        if (ev && ev.stopPropagation) ev.stopPropagation();
+        if (done) return;
+        done = true;
+        document.removeEventListener("mousemove", move, true);
+        document.removeEventListener("mouseup", up, true);
+        window.removeEventListener("blur", up);
+        cancelAnimationFrame(frame);
+        frame = 0;
+        document.documentElement.classList.remove("zoom-dragging");
+        setZoomDragging(false);
+        commitZoom(pct);
+      };
+
+      document.documentElement.classList.add("zoom-dragging");
+      setZoomDragging(true);
+      update(e.clientY);
+      document.addEventListener("mousemove", move, true);
+      document.addEventListener("mouseup", up, true);
+      window.addEventListener("blur", up);   // okno straciło fokus w trakcie
+    };
+
+    // Wartość wpisana w polu obok uchwytu (Enter albo kliknięcie obok).
+    const commitZoomInput = () => {
+      const text = zoomInput;
+      setZoomInput(null);
+      if (zoomInputCancelRef.current) { zoomInputCancelRef.current = false; return; }
+      if (text === null) return;
+      const digits = text.replace(/\D/g, "");
+      if (!digits) return;                       // puste pole: zostaje jak było
+      const v = parseInt(digits, 10);
+      if (!(v >= ZOOM_MIN && v <= ZOOM_MAX)) {
+        showToast(`Wpisz powiększenie od ${ZOOM_MIN}% do ${ZOOM_MAX}%`);
+        return;
+      }
+      commitZoom(v);
+    };
+    // Okładka: suwak się chowa. Wartość, która była właśnie wpisywana, przepada.
+    useEffect(() => {
+      if (!coverLock) return;
+      const ae = document.activeElement;
+      if (ae && ae.classList && ae.classList.contains("zoom-value")) {
+        zoomInputCancelRef.current = true;
+        ae.blur();
+      }
+    }, [coverLock]);
+    const zoomText = zoomInput !== null ? zoomInput : shownPct + "%";
+    const zoomHandleTop = ZOOM_TRACK_TOP + (1 - zoomToPos(shownPct)) * ZOOM_TRACK_LEN;
+
     const boxesFor = (pageKey) => boxes.filter((b) => b.page === pageKey);
     const imagesFor = (pageKey) => images.filter((im) => im.page === pageKey);
     const wrapClass = "book-wrap"
@@ -6258,27 +6688,43 @@
     // Dodawanie stron działa na okładce tylko wtedy, gdy książka jest pusta.
     const addPagesBlocked = coverLock && pageKeys.length > 0;
     return h("div", { className: "app" },
+      // Warstwa z książką: całe okno, pod całym interfejsem. Gdy powiększona
+      // książka nie mieści się w oknie, pojawiają się paski przewijania.
+      h("div", {
+        className: "book-scroller",
+        ref: scrollerRef,
+        onScroll: (e) => {
+          scrollPosRef.current = { l: e.currentTarget.scrollLeft, t: e.currentTarget.scrollTop };
+        }
+      },
+       h("div", {
+        className: "book-scroll-content",
+        style: { width: lay.cw + "px", height: lay.ch + "px" }
+       },
       h("div", {
         className: wrapClass,
         ref: wrapRef,
-        // One "page unit". Lives here, not on the pages, because the
-        // page-flip library rewrites each page's style attribute.
-        style: { "--u": (size.w / REF_PAGE_W) + "px" }
+        style: {
+          left: lay.x + "px",
+          top: lay.y + "px",
+          width: (shown.w * 2) + "px",
+          height: shown.h + "px",
+          // One "page unit". Lives here, not on the pages, because the
+          // page-flip library rewrites each page's style attribute.
+          "--u": (size.w / REF_PAGE_W) + "px",
+          "--zoom": size.w / baseSize.w
+        }
       },
-        // Placeholder spacer: invisible but takes up space until the book fully loads
-        !bookReady && h("div", {
-          style: {
-            width: (size.w * 2) + "px",
-            height: size.h + "px",
-            visibility: "hidden",
-            pointerEvents: "none"
-          }
-        }),
-
         h("div", {
           ref: flipbookContainerRef,
           className: "flipbook-container hidden",
-          style: { width: (size.w * 2) + "px", height: size.h + "px" }
+          style: {
+            width: (size.w * 2) + "px",
+            height: size.h + "px",
+            // Podgląd w trakcie przeciągania uchwytu suwaka.
+            transform: previewScale !== 1 ? `scale(${previewScale})` : "",
+            transformOrigin: "0 0"
+          }
         },
           h(FlipBook, {
             key: `${size.w}x${size.h}#${bookVersion}`,
@@ -6313,7 +6759,20 @@
             h(Surface, { key: "c1", ...surfaceProps("c1", true) }),
             ...pageKeys.map((k) => h(Surface, { key: k, ...surfaceProps(k, false) })),
             h(Surface, { key: "c2", ...surfaceProps("c2", true) })
-          ),
+          )
+        ),
+        h("div", { className: "book-freeze", ref: freezeRef })
+      )
+       )
+      ),
+      // Miejsce książki przy 100% (tu książka stoi bez powiększenia). Przyciski
+      // narzędzi, notki i suwak są przypięte do niego, więc zostają na swoich
+      // miejscach przy każdym powiększeniu.
+      h("div", {
+        className: "book-slot",
+        ref: slotRef,
+        style: { width: (baseSize.w * 2) + "px", height: baseSize.h + "px" }
+      },
           !VIEWER && h("div", { className: "toggle-row" },
             h("div", {
               className: "toggle-btn" + (tool === TOOL_TEXT ? " active" : "") + (coverLock ? " disabled" : ""),
@@ -6389,13 +6848,65 @@
                 ? "Wczytywanie obrazu… Możesz już kliknąć miejsce na stronie."
                 : "Kliknij miejsce na stronie, w\u00A0którym ma się pojawić obraz."
             )
+          ),
+          // Suwak powiększenia przy lewym dolnym rogu książki: na górze 400%,
+          // na dole 10%, w połowie 100%. Tylko myszką albo przez wpisanie wartości.
+          // Na okładce (i gdy książka się na nią zamyka) jest schowany.
+          !VIEWER && h("div", {
+            className: "zoom-control" + (zoomDragging ? " dragging" : "") + (coverLock ? " hidden" : ""),
+            style: { height: ZOOM_PANEL_H + "px" }
+          },
+            h("div", { className: "zoom-end top" }, ZOOM_MAX + "%"),
+            h("div", { className: "zoom-end bottom" }, ZOOM_MIN + "%"),
+            h("div", {
+              className: "zoom-track",
+              ref: zoomTrackRef,
+              style: { top: ZOOM_TRACK_TOP + "px", height: ZOOM_TRACK_LEN + "px" }
+            }),
+            h("div", { className: "zoom-mid", style: { top: (ZOOM_TRACK_TOP + ZOOM_TRACK_LEN / 2) + "px" } }),
+            h("div", {
+              className: "zoom-hit",
+              "data-tip": "Powiększenie książki",
+              style: { top: (ZOOM_TRACK_TOP - 10) + "px", height: (ZOOM_TRACK_LEN + 20) + "px" },
+              onMouseDown: startZoomDrag
+            }),
+            h("div", { className: "zoom-handle", style: { top: zoomHandleTop + "px" } }),
+            // Aktualna wartość, po lewej stronie uchwytu. Można ją kliknąć i wpisać.
+            h("input", {
+              type: "text",
+              className: "zoom-value",
+              inputMode: "numeric",
+              maxLength: 5,
+              spellCheck: false,
+              autoComplete: "off",
+              "data-tip": `Wpisz powiększenie (od ${ZOOM_MIN}% do ${ZOOM_MAX}%) i naciśnij Enter`,
+              style: { top: zoomHandleTop + "px" },
+              value: zoomText,
+              onFocus: (e) => {
+                const el = e.target;
+                setZoomInput(zoom + "%");
+                setTimeout(() => { if (document.activeElement === el) el.select(); }, 0);
+              },
+              // Tylko cyfry (i znak procentu).
+              onChange: (e) => setZoomInput(e.target.value.replace(/[^0-9%]/g, "")),
+              onKeyDown: (e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  e.target.blur();                  // zatwierdza (onBlur)
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  zoomInputCancelRef.current = true;
+                  e.target.blur();
+                }
+              },
+              onBlur: commitZoomInput
+            })
           )
-        ),
-        h("div", { className: "book-freeze", ref: freezeRef })
       ),
       // Wiersz pod książką: przyciski kropek przy lewej krawędzi książki,
       // przewracanie stron na środku, przyciski plików przy prawej.
-      h("div", { className: "controls", style: { width: (size.w * 2) + "px" } },
+      h("div", { className: "controls", style: { width: (baseSize.w * 2) + "px" } },
         // Przyciski niestandardowego układu kropek (wyrównywanie do punktów).
         !VIEWER && h("div", {
           className: "dots-actions" + (alignOn && !coverLock ? " visible" : ""),

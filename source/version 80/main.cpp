@@ -359,6 +359,56 @@ static bool WriteUtf8FileSafely(const std::wstring& path, const std::wstring& te
     return ok;
 }
 
+// ---- Ustawienia programu (powiększenie książki) -------------------------------
+// Jeden plik w folderze danych użytkownika, wspólny dla wszystkich kronik.
+// Zostaje po zamknięciu programu i po ponownym uruchomieniu komputera.
+const wchar_t SETTINGS_FILE_NAME[] = L"ustawienia.json";
+const int ZOOM_MIN = 10;        // te same granice co suwak w flipbook.html
+const int ZOOM_MAX = 400;
+const int ZOOM_DEFAULT = 100;
+
+static std::wstring GetSettingsPath()
+{
+    return GetUserDataDir() + L"\\" + SETTINGS_FILE_NAME;
+}
+
+// Liczba całkowita z tekstu (same cyfry), albo -1.
+static int ParseZoomNumber(const std::wstring& text, size_t pos)
+{
+    while (pos < text.size() && (text[pos] == L' ' || text[pos] == L'\t' || text[pos] == L'\r' || text[pos] == L'\n'))
+        pos++;
+    int value = 0, digits = 0;
+    while (pos < text.size() && text[pos] >= L'0' && text[pos] <= L'9' && digits < 6)
+    {
+        value = value * 10 + (text[pos] - L'0');
+        pos++;
+        digits++;
+    }
+    return digits > 0 ? value : -1;
+}
+
+// Zapamiętane powiększenie w procentach. Brak pliku albo zła wartość: 100.
+static int LoadSavedZoom()
+{
+    std::wstring content;
+    if (!ReadUtf8File(GetSettingsPath(), content)) return ZOOM_DEFAULT;
+    size_t key = content.find(L"\"zoom\"");
+    if (key == std::wstring::npos) return ZOOM_DEFAULT;
+    size_t colon = content.find(L':', key);
+    if (colon == std::wstring::npos) return ZOOM_DEFAULT;
+    int zoom = ParseZoomNumber(content, colon + 1);
+    return (zoom >= ZOOM_MIN && zoom <= ZOOM_MAX) ? zoom : ZOOM_DEFAULT;
+}
+
+// Zapisuje powiększenie (bezpiecznie: najpierw plik .tmp, patrz WriteUtf8FileSafely).
+static void SaveZoom(int zoom)
+{
+    if (zoom < ZOOM_MIN || zoom > ZOOM_MAX) return;
+    wchar_t text[64];
+    wsprintfW(text, L"{\n  \"zoom\": %d\n}\n", zoom);
+    WriteUtf8FileSafely(GetSettingsPath(), text);
+}
+
 // ---- View-only copy -----------------------------------------------------------
 // "Export" makes a copy of app.exe with a package glued to its end: the files
 // the page needs (flipbook.html, lib, fonts, WebView2Loader.dll) and one
@@ -831,6 +881,10 @@ static void ProcessPageMessages(HWND hwnd)
                 MoveFileExW(path.c_str(), (path + L".bad").c_str(), MOVEFILE_REPLACE_EXISTING);
             WriteUtf8FileSafely(GetLayoutsPath(), L"");   // empty file = empty list
         }
+        else if (cmd == L"zoomSave")       // użytkownik zmienił powiększenie książki
+        {
+            SaveZoom(ParseZoomNumber(rest, 0));
+        }
         else if (cmd == L"newDoc")         // nowa, pusta kronika: nie jest jeszcze plikiem
         {
             g_filePath.clear();
@@ -1083,7 +1137,17 @@ public:
             g_webview->add_ProcessFailed(failHandler, &token);
             failHandler->Release();
             std::wstring htmlUrl = ToFileUrl(g_pageDir + L"flipbook.html");
-            if (g_viewer) htmlUrl += L"?viewer=1";   // the page shows the book only
+            if (g_viewer)
+            {
+                htmlUrl += L"?viewer=1";   // the page shows the book only
+            }
+            else
+            {
+                // Zapamiętane powiększenie: strona od razu startuje w tym rozmiarze.
+                wchar_t zoomArg[32];
+                wsprintfW(zoomArg, L"?zoom=%d", LoadSavedZoom());
+                htmlUrl += zoomArg;
+            }
             HRESULT navHr = g_webview->Navigate(htmlUrl.c_str());
             if (FAILED(navHr))
             {
