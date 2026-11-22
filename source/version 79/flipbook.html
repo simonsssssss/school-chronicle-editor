@@ -970,7 +970,7 @@
     color: #888;
   }
   .dot-row .dots-btn { flex: none; }
-  /* "Usuń" w lewym dolnym rogu, reszta przycisków po prawej. */
+  /* "Usuń" / "Usuń wszystkie" w lewym dolnym rogu, reszta przycisków po prawej. */
   .dialog-actions .layouts-delete { margin-right: auto; }
   /* "Usuń" / "Wybierz", dopóki żaden układ nie jest kliknięty. */
   .dialog-actions button.disabled,
@@ -4173,6 +4173,11 @@
       if (!removeDotsDialogOpenRef.current) return;
       setCustomDots((prev) => prev.filter((_, i) => i !== index));
     };
+    const removeAllDots = () => {
+      if (!removeDotsDialogOpenRef.current) return;
+      if (!customDots.length) return;      // nic do usunięcia
+      setCustomDots([]);
+    };
 
     // Pisanie w polu: zostają tylko cyfry, a drugi margines z pary zmienia
     // się od razu.
@@ -6691,6 +6696,10 @@
               )
             : h("div", { className: "layouts-empty" }, "Na stronach nie ma żadnych kropek"),
           h("div", { className: "dialog-actions" },
+            h("button", {
+              className: "danger layouts-delete" + (customDots.length ? "" : " disabled"),
+              onClick: removeAllDots
+            }, "Usuń wszystkie"),
             h("button", { onClick: closeRemoveDotsDialog }, "Anuluj")
           )
         )
